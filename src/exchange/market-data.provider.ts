@@ -50,28 +50,50 @@ export class MarketDataProvider {
 
   async getAccountStatus(): Promise<AccountStatus> {
     try {
+      // Use reliable V3 endpoints
       const balances = await asterdexClient.getAccountBalance();
-      // Pro API returns an array of balances
-      const usdcAsset = balances.find((a: any) => a.asset === 'USDC' || a.asset === 'USDT');
-      const equity = usdcAsset ? parseFloat(usdcAsset.balance || usdcAsset.availableBalance) : 0;
-      
       const positions = await asterdexClient.getPositions();
-      // Filter only positions that have actual size (not zero)
+      
+      const usdtAsset = balances.find((a: any) => a.asset === 'USDT' || a.asset === 'USDC');
+      const walletBalance = usdtAsset ? parseFloat(usdtAsset.balance || usdtAsset.walletBalance || '0') : 0;
+      const availableBalance = usdtAsset ? parseFloat(usdtAsset.availableBalance || '0') : 0;
+      
       const activePositions = Array.isArray(positions) 
         ? positions.filter((p: any) => parseFloat(p.positionAmt || p.size || '0') !== 0)
         : [];
+
+      // Calculate aggregated metrics
+      let totalUnrealizedPnL = 0;
+      let totalMaintenanceMargin = 0;
+      
+      activePositions.forEach((p: any) => {
+        // AsterDex Pro V3 uses 'maintMargin' (lowercase 'm') or 'maintenanceMargin'
+        const mm = parseFloat(p.maintMargin || p.maintenanceMargin || '0');
+        totalUnrealizedPnL += parseFloat(p.unRealizedProfit || p.unrealizedProfit || '0');
+        totalMaintenanceMargin += mm;
+      });
+
+      const marginBalance = walletBalance + totalUnrealizedPnL;
+      const equity = marginBalance; // In Futures, Equity = Margin Balance
+      const marginRatio = marginBalance > 0 ? (totalMaintenanceMargin / marginBalance) * 100 : 0;
 
       return {
         current_equity: equity,
         open_positions: activePositions,
         daily_pnl: 0,
         loss_streak: 0,
+        available_balance: availableBalance,
+        margin_ratio: marginRatio,
+        maintenance_margin: totalMaintenanceMargin,
+        margin_balance: marginBalance,
+        total_wallet_balance: walletBalance
       };
     } catch (e) {
-      logger.error('Failed to fetch real ASTERDEX account info');
+      logger.error('CRITICAL: Failed to fetch real ASTERDEX account info. Blocking trade scan for safety.');
+      // Return a "Safety Block" state to prevent accidental trades
       return {
         current_equity: 0,
-        open_positions: [],
+        open_positions: [ { symbol: 'SAFETY_BLOCK', positionAmt: '1' } ], // Dummy position to trigger risk block
         daily_pnl: 0,
         loss_streak: 0,
       };

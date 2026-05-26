@@ -18,4 +18,9 @@ export interface AccountStatus {
   open_positions: any[];
   daily_pnl: number;
   loss_streak: number;
+  available_balance?: number;
+  margin_ratio?: number;
+  maintenance_margin?: number;
+  margin_balance?: number;
+  total_wallet_balance?: number;
 }

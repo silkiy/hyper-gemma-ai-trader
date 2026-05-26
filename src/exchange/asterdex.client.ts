@@ -125,6 +125,30 @@ export class AsterdexClient {
     }
   }
 
+  async getAccountInfo() {
+    // Note: V3 might not have a single /account endpoint like V2.
+    // We will primarily rely on /v3/balance and /v3/positionRisk.
+    // This method is kept for future-proofing if /v3/account is added.
+    const nonce = this.getNonce();
+    const params = new URLSearchParams({
+      user: this.userAddress,
+      signer: this.signerAddress,
+      nonce: nonce
+    });
+
+    const queryString = params.toString();
+    const signature = await this.generateV3Signature(queryString);
+    
+    try {
+      const url = `${this.baseUrl}/fapi/v3/account?${queryString}&signature=${signature}`;
+      const response = await axios.get(url);
+      return response.data;
+    } catch (error) {
+      // If V3 account fails, we'll fall back to calculating from balance/positions
+      throw error;
+    }
+  }
+
   async getPositions() {
     const nonce = this.getNonce();
     const params = new URLSearchParams({
