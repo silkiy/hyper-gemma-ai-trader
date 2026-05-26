@@ -21,7 +21,7 @@ export function validateAIDecision(data: any) {
     return AIDecisionSchema.parse(data);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      throw new Error(`Invalid AI Decision JSON: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
+      throw new Error(`Invalid AI Decision JSON: ${error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
     }
     throw error;
   }

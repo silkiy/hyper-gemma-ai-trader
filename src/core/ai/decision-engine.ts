@@ -25,10 +25,18 @@ export class DecisionEngine {
 
       // 2. Continuous Learning: Only learn after reaching 5 trades threshold
       const recentTrades = await tradeRepository.findRecent(10);
+      
+      // 3. Pre-AI Risk Check (Stop early if positions are full or safety risk exists)
+      const riskValidation = riskManager.validateDecision({ decision: TradeAction.SKIP } as any, accountStatus, currentMode);
+      if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked:')) {
+        logger.info({ reason: riskValidation.final_summary }, 'Skipping AI analysis: Risk manager issued a block');
+        return riskValidation;
+      }
+
       const memories = recentTrades.length >= 5 
         ? recentTrades.slice(0, 5).map(t => ({
-            mistake: t.profit_loss < 0 ? `LOSS on ${t.pair}` : `PROFIT on ${t.pair}`,
-            lesson: `Action: ${t.action}, Reason: ${t.ai_reasoning}, PnL: ${t.profit_loss}$`
+            mistake: (t.profit_loss ?? 0) < 0 ? `LOSS on ${t.pair}` : `PROFIT on ${t.pair}`,
+            lesson: `Action: ${t.action}, Reason: ${t.ai_reasoning}, PnL: ${t.profit_loss ?? 0}$`
           }))
         : [];
 
@@ -38,13 +46,13 @@ export class DecisionEngine {
         logger.info('Continuous Learning Mode: Feedback loop active with last 5 trades');
       }
 
-      // 3. Build Prompt
+      // 4. Build Prompt
       const prompt = promptBuilder.buildTradePrompt(marketData, accountStatus, memories);
 
-      // 4. Get AI Decision
+      // 5. Get AI Decision
       const aiDecision = await ollamaClient.generateDecision(prompt);
 
-      // 5. Validate with Risk Manager
+      // 6. Final Validation with Risk Manager
       const finalDecision = riskManager.validateDecision(aiDecision, accountStatus, currentMode);
 
       logger.info({ decision: finalDecision.decision }, 'Final trade decision reached');

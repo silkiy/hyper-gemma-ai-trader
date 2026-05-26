@@ -7,7 +7,7 @@ import { marketDataProvider } from './market-data.provider.js';
 export class OrderExecutor {
   private readonly MIN_NOTIONAL = 5.1; // $5.1 to be safe against exchange min $5
 
-  async executeOrder(decision: AIDecision, symbol: string): Promise<{ orderId: string; status: string }> {
+  async executeOrder(decision: AIDecision, symbol: string): Promise<{ orderId: string; status: string; price: number }> {
     const cleanSymbol = symbol.replace('/', '').replace('-', '');
     
     logger.info({ 
@@ -56,7 +56,7 @@ export class OrderExecutor {
       const orderId = order.orderId || `aster-pro-${Math.random().toString(36).substr(2, 9)}`;
       logger.info({ orderId }, 'Order executed successfully on ASTERDEX Pro API');
       
-      return { orderId, status: 'FILLED' };
+      return { orderId, status: 'FILLED', price };
     } catch (error) {
       logger.error({ error }, 'Failed to execute order on ASTERDEX Pro API');
       throw error;

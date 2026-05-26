@@ -32,7 +32,7 @@ export class OllamaClient {
       return {
         decision: TradeAction.SKIP,
         confidence_score: 90,
-        market_regime: MarketRegime.STABLE,
+        market_regime: MarketRegime.RANGING,
         risk_level: RiskLevel.LOW,
         leverage_suggestion: 1,
         position_size: PositionSize.SMALL,

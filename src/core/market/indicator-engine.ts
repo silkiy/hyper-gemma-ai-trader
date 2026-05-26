@@ -5,13 +5,14 @@ export class IndicatorEngine {
    * Simple Exponential Moving Average calculation
    */
   calculateEMA(prices: number[], period: number): number {
-    if (prices.length < period) return prices[prices.length - 1];
+    if (prices.length < period) return prices[prices.length - 1] ?? 0;
     
     const k = 2 / (period + 1);
-    let ema = prices[0];
+    let ema = prices[0] ?? 0;
     
     for (let i = 1; i < prices.length; i++) {
-      ema = prices[i] * k + ema * (1 - k);
+      const price = prices[i] ?? 0;
+      ema = price * k + ema * (1 - k);
     }
     
     return new Decimal(ema).toDecimalPlaces(2).toNumber();
@@ -27,7 +28,9 @@ export class IndicatorEngine {
     let losses = 0;
 
     for (let i = prices.length - period; i < prices.length; i++) {
-      const diff = prices[i] - prices[i - 1];
+      const current = prices[i] ?? 0;
+      const previous = prices[i - 1] ?? 0;
+      const diff = current - previous;
       if (diff >= 0) gains += diff;
       else losses -= diff;
     }
@@ -48,9 +51,13 @@ export class IndicatorEngine {
     
     let trSum = 0;
     for (let i = closes.length - period; i < closes.length; i++) {
-      const hl = highs[i] - lows[i];
-      const hpc = Math.abs(highs[i] - closes[i - 1]);
-      const lpc = Math.abs(lows[i] - closes[i - 1]);
+      const high = highs[i] ?? 0;
+      const low = lows[i] ?? 0;
+      const prevClose = closes[i - 1] ?? 0;
+      
+      const hl = high - low;
+      const hpc = Math.abs(high - prevClose);
+      const lpc = Math.abs(low - prevClose);
       trSum += Math.max(hl, hpc, lpc);
     }
     

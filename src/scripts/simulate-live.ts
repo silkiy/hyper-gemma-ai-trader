@@ -19,6 +19,7 @@ async function runHighFidelitySimulation() {
 
     for (let i = 0; i < 5; i++) {
         const pair = testPairs[i];
+        if (!pair) continue;
         logger.info(`--- SIMULATION STEP ${i + 1} [Capital: $${currentEquity.toFixed(2)}] ---`);
         
         try {

@@ -10,11 +10,12 @@ const envSchema = z.object({
   ASTERDEX_BASE_URL: z.string().url().default('https://fapi.asterdex.com'),
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
   OLLAMA_MODEL: z.string().default('gemma:7b-instruct'),
-  MOCK_AI: z.string().transform(v => v === 'true').default('false'),
+  MOCK_AI: z.string().default('false').transform(v => v === 'true'),
   TRADING_PAIR: z.string().default('ETH/USDC'),
   WALLET_ADDRESS: z.string().optional(),
-  HYPERLIQUID_TESTNET: z.string().transform(v => v !== 'false').default('true'),
-  PORT: z.string().transform(Number).default('3000'),
+  HYPERLIQUID_TESTNET: z.string().default('true').transform(v => v !== 'false'),
+  PORT: z.string().default('3000').transform(Number),
+  MAX_POSITIONS: z.string().default('2').transform(Number),
 });
 
 export const env = envSchema.parse(process.env);

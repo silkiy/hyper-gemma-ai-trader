@@ -2,6 +2,7 @@ import { tradeRepository } from '../database/repositories/trade.repository.js';
 import { orderExecutor } from '../exchange/order.executor.js';
 import type { AIDecision } from '../types/ai.types.js';
 import { logger } from '../utils/logger.js';
+import { sessionService } from './session.service.js';
 
 export class TradeService {
   async handleTradeDecision(decision: AIDecision, pair: string) {
@@ -17,7 +18,7 @@ export class TradeService {
       await tradeRepository.create({
         pair: pair, 
         action: decision.decision,
-        entry_price: 0, // Should come from execution
+        entry_price: execution.price || 0,
         leverage: decision.leverage_suggestion,
         confidence_score: decision.confidence_score,
         market_regime: decision.market_regime,
@@ -28,7 +29,7 @@ export class TradeService {
         ollama_raw_response: 'N/A',
         ai_reasoning: decision.entry_reason,
         self_reflection: decision.self_reflection,
-        session_id: undefined // Should be handled by session service
+        session_id: sessionService.getCurrentSessionId()
       } as any);
 
       return execution;

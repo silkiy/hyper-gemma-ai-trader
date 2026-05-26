@@ -7,6 +7,10 @@ import type { AIDecision } from '../types/ai.types.js';
 import { tradeService } from '../services/trade.service.js';
 import mongoose from 'mongoose';
 
+declare global {
+  var backtestReport: string;
+}
+
 class BacktestEngine {
   private decisionEngine: DecisionEngine;
 
@@ -27,6 +31,7 @@ class BacktestEngine {
       logger.info(`--- Iteration ${i + 1} [Target: ${pair}] ---`);
       
       try {
+        if (!pair) continue;
         const decision = await this.decisionEngine.evaluateTrade(pair, SessionMode.NORMAL);
         
         // Test Trade Service integration
