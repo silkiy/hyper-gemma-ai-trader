@@ -82,7 +82,7 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ```
 hyper-gemma-ai-trader/
 ├── src/
-│   ├── server.ts                    # Entry point utama (bootstrap + cron jobs)
+│   ├── server.ts                    # Entry point utama (bootstrap + cron + immediate scan)
 │   ├── core/                        # Logika inti (AI, Market, Risk)
 │   │   ├── ai/
 │   │   │   ├── decision-engine.ts   # Orkestrator keputusan trading AI
@@ -107,9 +107,11 @@ hyper-gemma-ai-trader/
 │   │   │   └── session.model.ts     # Schema sesi trading
 │   │   └── repositories/
 │   │       ├── trade.repository.ts  # Repository akses data trade
-│   │       └── memory.repository.ts # Repository akses data memory
+│   │       ├── memory.repository.ts # Repository akses data memory
+│   │       └── session.repository.ts # Repository akses data session
 │   ├── services/
-│   │   └── trade.service.ts         # Orchestrator eksekusi trade
+│   │   ├── trade.service.ts         # Orchestrator eksekusi trade
+│   │   └── session.service.ts       # Manajemen sesi trading (lifecycle)
 │   ├── api/
 │   │   ├── monitoring-api.ts        # Setup Fastify server
 │   │   └── routes/
@@ -170,10 +172,11 @@ hyper-gemma-ai-trader/
 Orkestrator utama yang mengoordinasikan seluruh proses pengambilan keputusan trading:
 
 - **Fetch Market Data** — Mengambil data market real-time dari AsterDex (harga, volume, indikator)
+- **Pre-AI Risk Check** — Memvalidasi risiko **sebelum** memanggil AI untuk menghemat resource (skip jika posisi penuh atau ada safety risk)
 - **Continuous Learning** — Mengambil 5 trade terakhir dari database sebagai konteks pembelajaran
 - **Build Prompt** — Menyusun prompt dinamis yang berisi data market, status akun, dan memori
 - **Get AI Decision** — Mengirim prompt ke Ollama/Gemma dan mendapatkan keputusan terstruktur
-- **Risk Validation** — Memvalidasi keputusan AI melalui Risk Manager sebelum eksekusi
+- **Final Risk Validation** — Memvalidasi keputusan AI melalui Risk Manager sebelum eksekusi
 - **Fallback Safety** — Jika terjadi error, mengembalikan keputusan SKIP sebagai fallback
 
 **Output AI Decision:**
@@ -279,14 +282,15 @@ Mengklasifikasikan kondisi market saat ini berdasarkan indikator:
 
 Layer perlindungan modal yang dapat meng-override keputusan AI:
 
-- **Max 1 Position** — Hanya 1 posisi aktif yang diizinkan di saat bersamaan
+- **Dynamic Max Positions** — Membatasi jumlah posisi aktif berdasarkan `MAX_POSITIONS` di environment (default: 2, configurable)
+- **Liquidation Safety Check** — Memblokir pembukaan posisi baru jika posisi existing terlalu dekat dengan harga likuidasi (threshold: 30% distance)
 - **Leverage Cap** — Membatasi leverage hingga maksimal 500x
 - **Position Sizing** — Kalkulasi ukuran posisi berdasarkan tingkat risiko:
   - `NORMAL` → 100% dari safe margin
   - `REDUCED` → 50% dari safe margin
   - `SMALL` → 25% dari safe margin
-- **Active Position Monitor** — Menampilkan detail posisi aktif (PnL, entry price, return)
-- **Trading Blocked** — Memblokir trade baru jika sudah ada posisi aktif
+- **Active Position Monitor** — Menampilkan detail posisi aktif (PnL, entry price, margin, ROE, liquidation price)
+- **Trading Blocked** — Memblokir trade baru jika posisi penuh atau ada safety risk
 
 ---
 
@@ -354,6 +358,7 @@ Mengeksekusi order ke exchange AsterDex:
 - **Auto Leverage** — Mengatur leverage sebelum membuat order
 - **Auto Margin** — Memaksa CROSSED margin type
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
+- **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
 
 ---
 
@@ -365,6 +370,8 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 
 - **Decision Handling** — Memfilter keputusan SKIP/WAIT dan hanya mengeksekusi LONG/SHORT
 - **Order Execution** — Meneruskan order ke Order Executor
+- **Session Linking** — Menghubungkan setiap trade ke session aktif via `SessionService`
+- **Accurate Entry Price** — Menyimpan harga eksekusi aktual dari Order Executor
 - **Database Logging** — Menyimpan setiap trade ke MongoDB dengan detail lengkap
 - **Error Handling** — Menangkap dan mencatat error eksekusi
 
@@ -396,6 +403,7 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 |------------|-------|
 | **TradeRepository** | `create()`, `findRecent(limit)`, `getStats()` (aggregation pipeline) |
 | **MemoryRepository** | `saveLesson()` (upsert), `findTopMistakes(limit)` |
+| **SessionRepository** | `create()`, `findLatest()`, `update(id, data)` |
 
 ---
 
@@ -441,18 +449,25 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 
 ---
 
-### 16. ⏰ Scheduled Jobs (Pekerjaan Terjadwal)
+### 16. ⏰ Scheduled Jobs & Scan Engine (Pekerjaan Terjadwal)
 
 | Job | Jadwal | Deskripsi |
 |-----|--------|-----------|
+| **Immediate Scan** | Saat startup | Scan market langsung saat server dimulai (tidak menunggu 5 menit) |
 | **Full Market Scan** | Setiap 5 menit (`*/5 * * * *`) | Memindai seluruh market, evaluasi setiap pair, eksekusi jika ada peluang |
 | **Memory Consolidation** | Setiap hari pukul 00:00 (`0 0 * * *`) | Mengkonsolidasi memori dan pelajaran dari trading sebelumnya |
 
+**Scan Engine Features:**
+- **Scan Deduplication** — Cooldown 1 menit antar scan untuk mencegah redundansi (startup vs cron)
+- **Pre-Scan Risk Validation** — Cek status posisi dan safety **sebelum** iterasi pair (hemat API calls)
+- **Detailed Portfolio Snapshot** — Menampilkan side, size, entry/mark/liq price, margin, PnL, ROE untuk setiap posisi aktif saat scan di-skip
+
 **Market Scan Flow:**
-1. Ambil semua simbol trading aktif dari exchange
-2. Evaluasi setiap pair menggunakan AI Decision Engine
-3. Jika ditemukan peluang (LONG/SHORT), eksekusi dan berhenti (max 1 posisi)
-4. Tampilkan portfolio snapshot setelah scan
+1. Pre-scan: cek posisi aktif & liquidation safety → jika blocked, tampilkan portfolio snapshot dan skip
+2. Ambil semua simbol trading aktif dari exchange
+3. Evaluasi setiap pair menggunakan AI Decision Engine
+4. Jika ditemukan peluang (LONG/SHORT), eksekusi dan berhenti (max positions sesuai `MAX_POSITIONS`)
+5. Tampilkan portfolio snapshot setelah scan
 
 ---
 
@@ -499,7 +514,20 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 
 ---
 
-### 20. 📋 Type System (Sistem Tipe)
+### 20. 🔄 Session Service (Manajemen Sesi)
+
+**File:** `src/services/session.service.ts`
+
+Mengelola lifecycle sesi trading:
+
+- **Start New Session** — Membuat sesi baru di database saat bootstrap (dengan mode NORMAL/SAFE_MODE/COOLDOWN)
+- **Get Current Session ID** — Menyediakan session ID untuk dihubungkan ke setiap trade
+- **Update Stats** — Memperbarui statistik sesi (total trades, PnL harian)
+- **Fail-Safe** — Throw error jika belum ada session aktif saat trade dieksekusi
+
+---
+
+### 21. 📋 Type System (Sistem Tipe)
 
 #### Enum Types (`src/types/enum.types.ts`)
 
@@ -528,27 +556,28 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 ## 🔄 Trading Pipeline (Alur Trading)
 
 ```
-1. 📡 Fetch market data (price, EMA, RSI, volume, ATR)
+ 0. 🚀 Bootstrap: Connect DB → Start API → Init Session → Immediate Scan
          │
-2. ⏳ Check cooldown → if COOLDOWN → SKIP
+ 1. 🔒 Scan Deduplication: Skip jika scan terakhir < 1 menit
          │
-3. 📚 Load recent memory dari MongoDB (5 trade terakhir)
+ 2. 🛡️ Pre-Scan Risk Check: Cek posisi aktif & liquidation safety
+         │     └─ Jika blocked → Tampilkan Portfolio Snapshot → SKIP
          │
-4. 📝 Inject konteks ke prompt (market + account + memory)
+ 3. 📡 Fetch semua trading pairs dari exchange
          │
-5. 🤖 Kirim ke Ollama/Gemma → terima JSON decision
+ 4. 🔁 Loop setiap pair:
+         │     ├─ 📊 Fetch market data (price, EMA, RSI, ATR)
+         │     ├─ 🛡️ Pre-AI Risk Check → Skip AI jika posisi penuh
+         │     ├─ 📚 Load memory (5 trade terakhir)
+         │     ├─ 📝 Build prompt (market + account + memory)
+         │     ├─ 🤖 Kirim ke Ollama/Gemma → terima JSON
+         │     ├─ ✅ Validasi JSON terhadap Zod schema
+         │     ├─ 🛡️ Final Risk Validation (leverage cap)
+         │     └─ 💹 Eksekusi order → Simpan ke DB dengan session ID
          │
-6. ✅ Validasi JSON response terhadap Zod schema
+ 5. 💰 Portfolio Snapshot (jika ada posisi aktif)
          │
-7. 🛡️ Risk Manager: validasi leverage, posisi, ukuran
-         │
-8. 💹 Jika validasi lolos → eksekusi order di AsterDex
-         │
-9. 💾 Simpan trade document ke MongoDB
-         │
-10. 📊 Update portfolio snapshot
-         │
-11. 🔁 Loop setiap 5 menit
+ 6. 🔁 Loop setiap 5 menit + Memory Consolidation harian
 ```
 
 ---
@@ -606,6 +635,7 @@ npm run backtest     # Jalankan backtesting
 | `ASTERDEX_SECRET` | Private key untuk signing | — |
 | `ASTERDEX_BASE_URL` | Base URL AsterDex API | `https://fapi.asterdex.com` |
 | `TRADING_MODE` | Mode trading | `PAPER` |
+| `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `2` |
 
 ---
 
@@ -614,8 +644,15 @@ npm run backtest     # Jalankan backtesting
 ### ✅ Sudah Diimplementasi
 - [x] AI Decision Engine dengan Gemma
 - [x] Integrasi AsterDex V3 API (EIP-712)
-- [x] Indikator teknikal (EMA, RSI, ATR)
+- [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
 - [x] Risk Management & Leverage Cap
+- [x] Dynamic Max Positions (configurable via `MAX_POSITIONS`)
+- [x] Liquidation Safety Check (30% threshold)
+- [x] Pre-AI Risk Validation (skip AI jika posisi penuh)
+- [x] Session Management (lifecycle tracking)
+- [x] Immediate Scan on Startup + Scan Deduplication
+- [x] Detailed Portfolio Snapshot (margin, ROE, liq price)
+- [x] Accurate Entry Price Tracking dari execution
 - [x] Self-Learning Memory System
 - [x] Full Market Scanning (semua pair)
 - [x] Monitoring API (Prometheus + Fastify)
