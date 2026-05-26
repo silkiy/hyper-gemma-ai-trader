@@ -318,13 +318,15 @@ Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
 | **EIP-712 Signing** | Tanda tangan kriptografis menggunakan `ethers.js` Wallet |
 | **Get Candles** | Mengambil data candlestick (klines) untuk analisis |
 | **Get Ticker 24h** | Mengambil statistik harga 24 jam |
+| **Get Exchange Info** | Mengambil informasi exchange (symbols, precision, status) |
 | **Get All Symbols** | Mengambil semua pasangan trading yang aktif |
 | **Get Account Balance** | Mengambil saldo akun (USDC/USDT) |
+| **Get Account Info** | Mengambil informasi akun lengkap (future-proof V3) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
 | **Place Order** | Membuat order MARKET atau LIMIT |
 | **Set Leverage** | Mengatur leverage per simbol |
 | **Set Margin Type** | Mengatur tipe margin (CROSSED/ISOLATED) |
-| **Get Symbol Precision** | Mengambil presisi kuantitas per simbol |
+| **Get Symbol Precision** | Mengambil presisi kuantitas via Exchange Info |
 
 **Autentikasi:**
 - Menggunakan **EIP-712 Typed Data** signing
@@ -342,8 +344,11 @@ Aggregator data market yang menggabungkan raw data dari exchange dengan indikato
 - **Real-time Market Data** — Mengambil klines dan ticker dari AsterDex
 - **Indicator Calculation** — Menghitung EMA20, EMA50, RSI, ATR dari data candlestick
 - **Trend Detection** — Menentukan trend (BULLISH/BEARISH/NEUTRAL) dari EMA crossover
-- **Account Status** — Mengambil equity, posisi aktif, dan PnL dari akun
-- **Fallback to Mock** — Jika API gagal, menggunakan data mock sebagai fallback
+- **Aggregated Account Metrics** — Menghitung equity, available balance, margin ratio, maintenance margin, margin balance, dan total wallet balance dari raw API data
+- **Active Position Filtering** — Filter posisi dengan `positionAmt ≠ 0` dari semua posisi
+- **Unrealized PnL Aggregation** — Menghitung total unrealized PnL dari seluruh posisi aktif
+- **Safety Block Pattern** — Jika API gagal, mengembalikan dummy position `SAFETY_BLOCK` untuk mencegah trade yang tidak diinginkan
+- **Fallback to Mock** — Jika API market data gagal, menggunakan data mock sebagai fallback
 
 ---
 
@@ -388,7 +393,7 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 
 | Model | File | Deskripsi |
 |-------|------|-----------|
-| **Trade** | `src/database/models/trade.model.ts` | Menyimpan setiap trade: pair, action, leverage, confidence, regime, risk, PnL, AI reasoning |
+| **Trade** | `src/database/models/trade.model.ts` | Menyimpan setiap trade: session_id (ref Session), pair, action, entry/exit price, exit_reason, mistake_analysis, leverage, confidence, regime, risk, PnL, AI reasoning |
 | **Memory** | `src/database/models/memory.model.ts` | Menyimpan pelajaran: kategori, kesalahan, pelajaran, kondisi market, frekuensi |
 | **Session** | `src/database/models/session.model.ts` | Menyimpan sesi: PnL harian, equity puncak, drawdown, streak, mode |
 
@@ -460,7 +465,10 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 **Scan Engine Features:**
 - **Scan Deduplication** — Cooldown 1 menit antar scan untuk mencegah redundansi (startup vs cron)
 - **Pre-Scan Risk Validation** — Cek status posisi dan safety **sebelum** iterasi pair (hemat API calls)
-- **Detailed Portfolio Snapshot** — Menampilkan side, size, entry/mark/liq price, margin, PnL, ROE untuk setiap posisi aktif saat scan di-skip
+- **Reusable Portfolio Snapshot** — Fungsi `displayPortfolioSnapshot()` yang dapat dipanggil dari mana saja, menampilkan:
+  - 📊 **Account Summary** — Equity, available balance, margin balance
+  - 💰 **Position Details** — Side, size, entry/mark/liq price, margin, PnL, ROE per posisi
+  - Graceful handling jika tidak ada posisi aktif
 
 **Market Scan Flow:**
 1. Pre-scan: cek posisi aktif & liquidation safety → jika blocked, tampilkan portfolio snapshot dan skip
@@ -548,8 +556,10 @@ Mengelola lifecycle sesi trading:
 - `OllamaResponse` — Format respons dari Ollama (termasuk metrics)
 
 #### Market Types (`src/types/market.types.ts`)
-- `MarketData` — Data market lengkap (harga, indikator, trend)
-- `AccountStatus` — Status akun (equity, posisi, PnL, streak)
+- `MarketData` — Data market lengkap (harga, indikator, trend, price_change_24h)
+- `AccountStatus` — Status akun lengkap:
+  - Core: `current_equity`, `open_positions`, `daily_pnl`, `loss_streak`
+  - Extended: `available_balance`, `margin_ratio`, `maintenance_margin`, `margin_balance`, `total_wallet_balance`
 
 ---
 
@@ -651,8 +661,11 @@ npm run backtest     # Jalankan backtesting
 - [x] Pre-AI Risk Validation (skip AI jika posisi penuh)
 - [x] Session Management (lifecycle tracking)
 - [x] Immediate Scan on Startup + Scan Deduplication
-- [x] Detailed Portfolio Snapshot (margin, ROE, liq price)
+- [x] Reusable Portfolio Snapshot (equity, margin, ROE, liq price)
+- [x] Aggregated Account Metrics (margin ratio, maintenance margin, wallet balance)
+- [x] Safety Block Pattern (mencegah trade saat API gagal)
 - [x] Accurate Entry Price Tracking dari execution
+- [x] Trade History dengan exit_reason & mistake_analysis
 - [x] Self-Learning Memory System
 - [x] Full Market Scanning (semua pair)
 - [x] Monitoring API (Prometheus + Fastify)
