@@ -328,7 +328,7 @@ Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
 | **Get Account Balance** | Mengambil saldo akun (USDC/USDT) |
 | **Get Account Info** | Mengambil informasi akun lengkap (future-proof V3) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
-| **Place Order** | Membuat order MARKET atau LIMIT |
+| **Place Order** | Membuat order MARKET, LIMIT, STOP_MARKET, atau TAKE_PROFIT_MARKET (dengan stopPrice & reduceOnly) |
 | **Set Leverage** | Mengatur leverage per simbol |
 | **Set Margin Type** | Mengatur tipe margin (CROSSED/ISOLATED) |
 | **Get Symbol Precision** | Mengambil presisi kuantitas via Exchange Info |
@@ -346,6 +346,7 @@ Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
 
 Aggregator data market yang menggabungkan raw data dari exchange dengan indikator teknikal:
 
+- **Strategy-Adaptive Interval** — Menggunakan timeframe `5m` untuk SCALPING dan `1h` untuk INTRADAY/SWING
 - **Real-time Market Data** — Mengambil klines dan ticker dari AsterDex
 - **Indicator Calculation** — Menghitung EMA20, EMA50, RSI, ATR dari data candlestick
 - **Trend Detection** — Menentukan trend (BULLISH/BEARISH/NEUTRAL) dari EMA crossover
@@ -361,14 +362,20 @@ Aggregator data market yang menggabungkan raw data dari exchange dengan indikato
 
 **File:** `src/exchange/order.executor.ts`
 
-Mengeksekusi order ke exchange AsterDex:
+Mengeksekusi order ke exchange AsterDex dengan proteksi otomatis:
 
 - **Min Notional** — Memastikan nilai order minimal $5.1 (memenuhi minimum exchange $5)
 - **Dynamic Quantity** — Menghitung kuantitas berdasarkan harga terkini dan presisi simbol
+- **Pre-Check Margin Validation** — Memvalidasi apakah available balance mencukupi **sebelum** mengirim order
 - **Auto Leverage** — Mengatur leverage sebelum membuat order
 - **Auto Margin** — Memaksa CROSSED margin type
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
 - **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
+- **Automated Stop Loss & Take Profit** — Setelah order utama tereksekusi, otomatis memasang:
+  - `STOP_MARKET` (SL) — 1% dari entry price (reduceOnly)
+  - `TAKE_PROFIT_MARKET` (TP) — 1.5% dari entry price (reduceOnly)
+  - Risk-to-Reward Ratio: **1:1.5**
+  - Graceful fallback jika SL/TP gagal (warning log, posisi tetap terbuka)
 
 ---
 
@@ -473,22 +480,24 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 while (true) {
   1. Cek Account & Risk Status
   2. Jika Blocked → Portfolio Snapshot → Wait 30s → Retry
-  3. Fetch All Tickers → Sort by 24h Volume
-  4. Filter Top 50 Pairs (most liquid)
-  5. Loop setiap pair:
+  3. Fetch All Trading Symbols dari Exchange
+  4. Loop setiap pair:
      - Evaluate via AI Decision Engine
-     - Jika peluang → Execute → Break (re-evaluate account)
+     - Jika peluang → Execute
+       - Sukses? → Break (re-evaluate account)
+       - Gagal (margin kurang)? → Lanjut ke pair berikutnya
      - Micro-delay 100ms antar pair (API friendly)
-  6. Brief pause 1s → Ulang dari step 1
+  5. Brief pause 1s → Ulang dari step 1
   * On crash → Wait 10s → Retry
 }
 ```
 
 **Engine Features:**
-- **Volume-Based Pair Filtering** — Hanya scan Top 50 pairs berdasarkan 24h trading volume (paling liquid & aktif)
+- **Full Exchange Scan** — Memindai seluruh pasangan trading aktif di exchange
+- **Smart Execution Continue** — Jika eksekusi gagal (misal margin kurang), lanjut scan pair berikutnya alih-alih berhenti
 - **Smart Blocking** — Saat posisi penuh atau ada safety risk, wait 30s (bukan spam API)
 - **Crash Recovery** — Jika terjadi error, tunggu 10s lalu otomatis restart loop
-- **Mid-Scan Break** — Setelah eksekusi trade, langsung kembali ke step 1 untuk re-evaluate account
+- **Conditional Break** — Hanya break dari loop scan jika trade benar-benar berhasil dieksekusi
 - **API-Friendly** — Micro-delay 100ms antar pair evaluation untuk menghindari rate limit
 - **Reusable Portfolio Snapshot** — Fungsi `displayPortfolioSnapshot(status?)` yang menerima optional parameter:
   - 📊 **Account Summary** — Equity, available balance, margin balance
@@ -594,9 +603,9 @@ Mengelola lifecycle sesi trading:
  │  2. 🛡️ Account & Risk Check
  │       │     └─ Jika blocked → Portfolio Snapshot → Wait 30s → Retry
  │       │
- │  3. 📡 Fetch All Tickers → Sort by 24h Volume → Top 50 Pairs
+ │  3. 📡 Fetch All Trading Symbols dari Exchange
  │       │
- │  4. 🔁 Loop Top 50 pairs:
+ │  4. 🔁 Loop semua pairs:
  │       │     ├─ 📊 Fetch market data (price, EMA, RSI, ATR)
  │       │     ├─ 🛡️ Pre-AI Risk Check → Skip AI jika posisi penuh
  │       │     ├─ 📚 Load memory (5 trade terakhir)
@@ -605,7 +614,8 @@ Mengelola lifecycle sesi trading:
  │       │     ├─ ✅ Validasi JSON terhadap Zod schema
  │       │     ├─ 🛡️ Final Risk Validation (leverage cap)
  │       │     ├─ 💹 Eksekusi order → Simpan ke DB dengan session ID
- │       │     ├─ ⚡ Break (re-evaluate account setelah trade)
+ │       │     ├─ ✅ Sukses? → Break (re-evaluate account)
+ │       │     ├─ ❌ Gagal? → Lanjut ke pair berikutnya
  │       │     └─ ⏱️ Micro-delay 100ms (API friendly)
  │       │
  │  5. ⏱️ Brief pause 1s → Kembali ke step 2
@@ -682,7 +692,8 @@ npm run backtest     # Jalankan backtesting
 - [x] AI Decision Engine dengan Gemma 4
 - [x] **Infinite Continuous Trading Engine** (menggantikan cron 5 menit)
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
-- [x] **Volume-Based Pair Filtering** (Top 50 pairs by 24h volume)
+- [x] **Full Exchange Scan** (seluruh pasangan trading aktif)
+- [x] **Smart Execution Continue** (lanjut scan jika eksekusi gagal)
 - [x] **Smart Blocking & Crash Recovery** (30s wait / 10s retry)
 - [x] Integrasi AsterDex V3 API (EIP-712)
 - [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
@@ -701,6 +712,9 @@ npm run backtest     # Jalankan backtesting
 - [x] Monitoring API (Prometheus + Fastify)
 - [x] Backtesting & Simulation
 - [x] Comprehensive Type Safety (Zod + TypeScript)
+- [x] **Automated Stop Loss & Take Profit** (1:1.5 RR, STOP_MARKET / TAKE_PROFIT_MARKET)
+- [x] **Pre-Check Margin Validation** (cek saldo sebelum order)
+- [x] **Strategy-Adaptive Timeframe** (5m SCALPING, 1h INTRADAY/SWING)
 
 ### 🔜 Rencana Pengembangan
 - [ ] Multi-agent trading
@@ -710,7 +724,6 @@ npm run backtest     # Jalankan backtesting
 - [ ] Portfolio balancing AI
 - [ ] Web dashboard
 - [ ] Telegram/Discord alert integration
-- [ ] Stop-loss & Take-profit auto management
 
 ---
 
