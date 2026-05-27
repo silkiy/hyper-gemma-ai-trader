@@ -80,19 +80,10 @@ async function startTradingEngine(mode: SessionMode) {
 
       // 3. Scan Exchange
       logger.info('--- CONTINUOUS MARKET SCAN START ---');
+      const allPairs = await asterdexClient.getAllSymbols();
+      logger.info({ totalPairs: allPairs.length }, 'Scanning entire exchange...');
       
-      // Fetch all tickers to filter by volume
-      const allTickers = await asterdexClient.getAllTickers();
-      
-      // Filter top 50 pairs by 24h volume to focus on most liquid/active coins
-      const topPairs = allTickers
-        .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
-        .slice(0, 50)
-        .map(t => t.symbol);
-
-      logger.info({ totalFiltered: topPairs.length }, 'Scanning top 50 coins by volume...');
-      
-      for (const pair of topPairs) {
+      for (const pair of allPairs) {
         try {
           // Check if position was opened by previous pair in this loop
           // (Brief check to avoid unnecessary AI calls if limit reached mid-scan)
@@ -101,12 +92,14 @@ async function startTradingEngine(mode: SessionMode) {
           
           if (decision.decision !== 'SKIP' && decision.decision !== 'WAIT') {
             logger.info({ pair, decision: decision.decision }, 'Opportunity found! Executing...');
-            await tradeService.handleTradeDecision(decision, pair);
-            
-            // Immediately exit symbol loop to re-evaluate account status after a trade
-            break; 
+            const execution = await tradeService.handleTradeDecision(decision, pair);
+
+            // Only exit the symbol loop if the trade was actually successful.
+            // If it failed (e.g., insufficient margin), continue scanning the next coin.
+            if (execution) {
+              break; 
+            }
           }
-          
           // Small micro-delay between pairs to be API friendly
           await new Promise(resolve => setTimeout(resolve, 100));
         } catch (error) {
