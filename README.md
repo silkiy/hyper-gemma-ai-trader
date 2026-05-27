@@ -35,7 +35,7 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    SERVER (Entry Point)               │
-│               Cron Jobs + Bootstrap                   │
+│          Infinite Trading Engine + Bootstrap          │
 ├──────────┬──────────┬──────────┬────────────────────┤
 │   API    │  CORE    │ EXCHANGE │    SERVICES         │
 │ (Fastify)│ (AI/Risk)│(AsterDex)│  (Trade Orchestr.)  │
@@ -51,7 +51,8 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ### Arsitektur Detail:
 
 - **Clean Architecture** — Pemisahan antara Core, Services, Database, dan Exchange
-- **Event Driven** — Cron-based job scheduling setiap 5 menit
+- **Infinite Scan Loop** — Continuous trading engine yang berjalan tanpa henti, bukan cron-based
+- **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING)
 - **AI Feedback Loop** — Hasil trading sebelumnya diinjeksikan ke prompt AI
 - **Self-Learning Memory** — MongoDB menyimpan pelajaran dari kesalahan
 - **Risk First Trading System** — Risk Manager sebagai penjaga terakhir sebelum eksekusi
@@ -64,7 +65,7 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 |----------|-----------|
 | **Runtime** | Node.js + TypeScript 6.0 |
 | **Web Server** | Fastify 5 |
-| **AI Engine** | Ollama + Gemma (2B / 7B-instruct) |
+| **AI Engine** | Ollama + Gemma 4 (gemma4:latest) |
 | **Database** | MongoDB Atlas + Mongoose 9 |
 | **Exchange** | AsterDex Futures API (V3) |
 | **Validation** | Zod 4 |
@@ -82,7 +83,7 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ```
 hyper-gemma-ai-trader/
 ├── src/
-│   ├── server.ts                    # Entry point utama (bootstrap + cron + immediate scan)
+│   ├── server.ts                    # Entry point utama (bootstrap + infinite trading engine)
 │   ├── core/                        # Logika inti (AI, Market, Risk)
 │   │   ├── ai/
 │   │   │   ├── decision-engine.ts   # Orkestrator keputusan trading AI
@@ -205,7 +206,7 @@ Orkestrator utama yang mengoordinasikan seluruh proses pengambilan keputusan tra
 
 Client HTTP yang terhubung ke Ollama API untuk inference model Gemma secara lokal:
 
-- **Model Configurasi** — Mendukung model Gemma 2B hingga 7B-instruct
+- **Model Configurasi** — Mendukung model Gemma 4 (gemma4:latest) dan varian lainnya
 - **Parameter Tuning** — Temperature 0.1 (konservatif), Top-K 40, Top-P 0.85
 - **Mock Mode** — Mode mock AI (`MOCK_AI=true`) untuk testing tanpa Ollama
 - **JSON Extraction** — Mengekstrak dan memvalidasi JSON dari respons LLM
@@ -220,9 +221,12 @@ Client HTTP yang terhubung ke Ollama API untuk inference model Gemma secara loka
 
 Membangun prompt terstruktur dalam Bahasa Indonesia untuk model Gemma:
 
+- **Strategy-Adaptive Prompt** — Instruksi berbeda berdasarkan `TRADING_STRATEGY`:
+  - `SCALPING` → Fokus micro-momentum, timeframe 5 menit, TP cepat, SL ketat, volume tinggi
+  - `INTRADAY/SWING` → Konfirmasi trend solid, timeframe 1 jam, ruang nafas untuk SL, target profit lebar
 - **System Instruction** — Persona "Hyper-Gemma Pro" sebagai AI Trading Engine
 - **Account Context** — Menyertakan equity, PnL harian, dan loss streak
-- **Market Context** — Menyertakan harga, EMA20/50, RSI, trend, dan ATR
+- **Market Context** — Menyertakan harga, EMA20/50, RSI, trend, ATR, dan 24h change
 - **Memory Injection** — Menyuntikkan pelajaran dari trading sebelumnya
 - **Response Schema** — Memaksa output JSON dengan format ketat
 - **Prinsip Capital Multiplication** — Mencari peluang profit di seluruh market
@@ -317,7 +321,8 @@ Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
 |-------|-----------|
 | **EIP-712 Signing** | Tanda tangan kriptografis menggunakan `ethers.js` Wallet |
 | **Get Candles** | Mengambil data candlestick (klines) untuk analisis |
-| **Get Ticker 24h** | Mengambil statistik harga 24 jam |
+| **Get Ticker 24h** | Mengambil statistik harga 24 jam per simbol |
+| **Get All Tickers** | Mengambil semua 24h ticker sekaligus (untuk volume-based filtering) |
 | **Get Exchange Info** | Mengambil informasi exchange (symbols, precision, status) |
 | **Get All Symbols** | Mengambil semua pasangan trading yang aktif |
 | **Get Account Balance** | Mengambil saldo akun (USDC/USDT) |
@@ -454,28 +459,41 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 
 ---
 
-### 16. ⏰ Scheduled Jobs & Scan Engine (Pekerjaan Terjadwal)
+### 16. ♾️ Infinite Trading Engine & Background Jobs
 
-| Job | Jadwal | Deskripsi |
-|-----|--------|-----------|
-| **Immediate Scan** | Saat startup | Scan market langsung saat server dimulai (tidak menunggu 5 menit) |
-| **Full Market Scan** | Setiap 5 menit (`*/5 * * * *`) | Memindai seluruh market, evaluasi setiap pair, eksekusi jika ada peluang |
-| **Memory Consolidation** | Setiap hari pukul 00:00 (`0 0 * * *`) | Mengkonsolidasi memori dan pelajaran dari trading sebelumnya |
+**Arsitektur baru:** Trading engine berjalan sebagai **infinite continuous loop** (bukan cron-based), memberikan respons tercepat terhadap peluang market.
 
-**Scan Engine Features:**
-- **Scan Deduplication** — Cooldown 1 menit antar scan untuk mencegah redundansi (startup vs cron)
-- **Pre-Scan Risk Validation** — Cek status posisi dan safety **sebelum** iterasi pair (hemat API calls)
-- **Reusable Portfolio Snapshot** — Fungsi `displayPortfolioSnapshot()` yang dapat dipanggil dari mana saja, menampilkan:
+| Komponen | Tipe | Deskripsi |
+|----------|------|-----------|
+| **Trading Engine** | Infinite Loop | Scan market secara terus-menerus tanpa interval tetap |
+| **Memory Consolidation** | Cron (`0 0 * * *`) | Mengkonsolidasi memori dan pelajaran harian |
+
+**Trading Engine Loop:**
+```
+while (true) {
+  1. Cek Account & Risk Status
+  2. Jika Blocked → Portfolio Snapshot → Wait 30s → Retry
+  3. Fetch All Tickers → Sort by 24h Volume
+  4. Filter Top 50 Pairs (most liquid)
+  5. Loop setiap pair:
+     - Evaluate via AI Decision Engine
+     - Jika peluang → Execute → Break (re-evaluate account)
+     - Micro-delay 100ms antar pair (API friendly)
+  6. Brief pause 1s → Ulang dari step 1
+  * On crash → Wait 10s → Retry
+}
+```
+
+**Engine Features:**
+- **Volume-Based Pair Filtering** — Hanya scan Top 50 pairs berdasarkan 24h trading volume (paling liquid & aktif)
+- **Smart Blocking** — Saat posisi penuh atau ada safety risk, wait 30s (bukan spam API)
+- **Crash Recovery** — Jika terjadi error, tunggu 10s lalu otomatis restart loop
+- **Mid-Scan Break** — Setelah eksekusi trade, langsung kembali ke step 1 untuk re-evaluate account
+- **API-Friendly** — Micro-delay 100ms antar pair evaluation untuk menghindari rate limit
+- **Reusable Portfolio Snapshot** — Fungsi `displayPortfolioSnapshot(status?)` yang menerima optional parameter:
   - 📊 **Account Summary** — Equity, available balance, margin balance
   - 💰 **Position Details** — Side, size, entry/mark/liq price, margin, PnL, ROE per posisi
   - Graceful handling jika tidak ada posisi aktif
-
-**Market Scan Flow:**
-1. Pre-scan: cek posisi aktif & liquidation safety → jika blocked, tampilkan portfolio snapshot dan skip
-2. Ambil semua simbol trading aktif dari exchange
-3. Evaluasi setiap pair menggunakan AI Decision Engine
-4. Jika ditemukan peluang (LONG/SHORT), eksekusi dan berhenti (max positions sesuai `MAX_POSITIONS`)
-5. Tampilkan portfolio snapshot setelah scan
 
 ---
 
@@ -541,6 +559,7 @@ Mengelola lifecycle sesi trading:
 
 | Enum | Values |
 |------|--------|
+| `TradingStrategy` | `SCALPING`, `INTRADAY`, `SWING` |
 | `TradingMode` | `PAPER`, `LIVE` |
 | `TradeAction` | `LONG`, `SHORT`, `WAIT`, `SKIP` |
 | `MarketRegime` | `TRENDING`, `RANGING`, `VOLATILE`, `UNCLEAR` |
@@ -566,28 +585,34 @@ Mengelola lifecycle sesi trading:
 ## 🔄 Trading Pipeline (Alur Trading)
 
 ```
- 0. 🚀 Bootstrap: Connect DB → Start API → Init Session → Immediate Scan
+ 0. 🚀 Bootstrap: Connect DB → Start API → Init Session
          │
- 1. 🔒 Scan Deduplication: Skip jika scan terakhir < 1 menit
+ 1. ♾️ Start Infinite Trading Engine
          │
- 2. 🛡️ Pre-Scan Risk Check: Cek posisi aktif & liquidation safety
-         │     └─ Jika blocked → Tampilkan Portfolio Snapshot → SKIP
-         │
- 3. 📡 Fetch semua trading pairs dari exchange
-         │
- 4. 🔁 Loop setiap pair:
-         │     ├─ 📊 Fetch market data (price, EMA, RSI, ATR)
-         │     ├─ 🛡️ Pre-AI Risk Check → Skip AI jika posisi penuh
-         │     ├─ 📚 Load memory (5 trade terakhir)
-         │     ├─ 📝 Build prompt (market + account + memory)
-         │     ├─ 🤖 Kirim ke Ollama/Gemma → terima JSON
-         │     ├─ ✅ Validasi JSON terhadap Zod schema
-         │     ├─ 🛡️ Final Risk Validation (leverage cap)
-         │     └─ 💹 Eksekusi order → Simpan ke DB dengan session ID
-         │
- 5. 💰 Portfolio Snapshot (jika ada posisi aktif)
-         │
- 6. 🔁 Loop setiap 5 menit + Memory Consolidation harian
+ ┌───────┤ CONTINUOUS LOOP (while true)
+ │       │
+ │  2. 🛡️ Account & Risk Check
+ │       │     └─ Jika blocked → Portfolio Snapshot → Wait 30s → Retry
+ │       │
+ │  3. 📡 Fetch All Tickers → Sort by 24h Volume → Top 50 Pairs
+ │       │
+ │  4. 🔁 Loop Top 50 pairs:
+ │       │     ├─ 📊 Fetch market data (price, EMA, RSI, ATR)
+ │       │     ├─ 🛡️ Pre-AI Risk Check → Skip AI jika posisi penuh
+ │       │     ├─ 📚 Load memory (5 trade terakhir)
+ │       │     ├─ 📝 Build strategy-adaptive prompt (SCALPING/INTRADAY)
+ │       │     ├─ 🤖 Kirim ke Ollama/Gemma4 → terima JSON
+ │       │     ├─ ✅ Validasi JSON terhadap Zod schema
+ │       │     ├─ 🛡️ Final Risk Validation (leverage cap)
+ │       │     ├─ 💹 Eksekusi order → Simpan ke DB dengan session ID
+ │       │     ├─ ⚡ Break (re-evaluate account setelah trade)
+ │       │     └─ ⏱️ Micro-delay 100ms (API friendly)
+ │       │
+ │  5. ⏱️ Brief pause 1s → Kembali ke step 2
+ │       │
+ └───────┘
+
+ 📅 Background: Memory Consolidation (Daily at 00:00)
 ```
 
 ---
@@ -598,7 +623,7 @@ Mengelola lifecycle sesi trading:
 - **Node.js** LTS
 - **MongoDB** (Atlas atau lokal)
 - **Ollama** terinstal dan running (`ollama serve`)
-- **Model Gemma** terinstal di Ollama (`ollama pull gemma:2b`)
+- **Model Gemma 4** terinstal di Ollama (`ollama pull gemma4:latest`)
 
 ### Setup
 
@@ -638,7 +663,7 @@ npm run backtest     # Jalankan backtesting
 | `LOG_LEVEL` | Level logging Pino | `info` |
 | `MONGODB_URI` | URI koneksi MongoDB Atlas | — |
 | `OLLAMA_BASE_URL` | URL server Ollama | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Model AI yang digunakan | `gemma:2b` |
+| `OLLAMA_MODEL` | Model AI yang digunakan | `gemma4:latest` |
 | `MOCK_AI` | Gunakan mock AI (tanpa Ollama) | `false` |
 | `ASTERDEX_USER_ADDRESS` | Wallet address pengguna | — |
 | `ASTERDEX_API_KEY` | API key (signer address) | — |
@@ -646,13 +671,19 @@ npm run backtest     # Jalankan backtesting
 | `ASTERDEX_BASE_URL` | Base URL AsterDex API | `https://fapi.asterdex.com` |
 | `TRADING_MODE` | Mode trading | `PAPER` |
 | `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `2` |
+| `TRADING_STRATEGY` | Strategi trading AI | `SCALPING` |
+| `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
 
 ---
 
 ## 🔮 Roadmap & Scalability
 
 ### ✅ Sudah Diimplementasi
-- [x] AI Decision Engine dengan Gemma
+- [x] AI Decision Engine dengan Gemma 4
+- [x] **Infinite Continuous Trading Engine** (menggantikan cron 5 menit)
+- [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
+- [x] **Volume-Based Pair Filtering** (Top 50 pairs by 24h volume)
+- [x] **Smart Blocking & Crash Recovery** (30s wait / 10s retry)
 - [x] Integrasi AsterDex V3 API (EIP-712)
 - [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
 - [x] Risk Management & Leverage Cap
@@ -660,7 +691,6 @@ npm run backtest     # Jalankan backtesting
 - [x] Liquidation Safety Check (30% threshold)
 - [x] Pre-AI Risk Validation (skip AI jika posisi penuh)
 - [x] Session Management (lifecycle tracking)
-- [x] Immediate Scan on Startup + Scan Deduplication
 - [x] Reusable Portfolio Snapshot (equity, margin, ROE, liq price)
 - [x] Aggregated Account Metrics (margin ratio, maintenance margin, wallet balance)
 - [x] Safety Block Pattern (mencegah trade saat API gagal)
