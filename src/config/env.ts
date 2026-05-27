@@ -16,6 +16,7 @@ const envSchema = z.object({
   HYPERLIQUID_TESTNET: z.string().default('true').transform(v => v !== 'false'),
   PORT: z.string().default('3000').transform(Number),
   MAX_POSITIONS: z.string().default('2').transform(Number),
+  TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
 });
 
 export const env = envSchema.parse(process.env);

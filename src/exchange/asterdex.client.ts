@@ -104,6 +104,17 @@ export class AsterdexClient {
     }
   }
 
+  async getAllTickers(): Promise<any[]> {
+    const url = `${this.baseUrl}/fapi/v3/ticker/24hr`;
+    try {
+      const response = await axios.get(url);
+      return response.data;
+    } catch (error) {
+      logger.error({ error }, 'Failed to fetch all tickers from ASTERDEX Pro API');
+      return [];
+    }
+  }
+
   async getAccountBalance() {
     const nonce = this.getNonce();
     const params = new URLSearchParams({

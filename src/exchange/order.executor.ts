@@ -24,6 +24,7 @@ export class OrderExecutor {
       // 2. Fetch latest price for quantity calculation
       const marketData = await marketDataProvider.getMarketData(symbol);
       const price = marketData.current_price;
+      const accountStatus = await marketDataProvider.getAccountStatus();
 
       // 3. Calculate Quantity to meet MIN_NOTIONAL ($5)
       // Fetch precision for the symbol
@@ -33,23 +34,35 @@ export class OrderExecutor {
       
       // Use Math.ceil with precision to ensure we are ALWAYS >= MIN_NOTIONAL
       const multiplier = Math.pow(10, precision);
-      const quantity = (Math.ceil(rawQuantity * multiplier) / multiplier).toFixed(precision);
+      const quantityStr = (Math.ceil(rawQuantity * multiplier) / multiplier).toFixed(precision);
+      const quantity = parseFloat(quantityStr);
       
+      // PRE-CHECK: Can we afford this with our current available balance?
+      const requiredMargin = (quantity * price) / decision.leverage_suggestion;
+      const available = accountStatus.available_balance || 0;
+      
+      if (requiredMargin > available) {
+        const errorMsg = `Insufficient Margin for minimum trade size on ${symbol}. Need $${requiredMargin.toFixed(4)}, but have $${available.toFixed(4)}`;
+        logger.warn(errorMsg);
+        throw new Error(errorMsg);
+      }
+
       // Map TradeAction to Side
       const side = decision.decision === TradeAction.LONG ? 'BUY' : 'SELL';
       
       logger.info({ 
         targetNotional: this.MIN_NOTIONAL, 
-        calcQuantity: quantity, 
+        calcQuantity: quantityStr, 
         price,
-        estimatedMargin: (this.MIN_NOTIONAL / decision.leverage_suggestion).toFixed(4)
+        estimatedMargin: requiredMargin.toFixed(4),
+        availableBalance: available.toFixed(4)
       }, 'Order calculation complete');
 
       const order = await asterdexClient.placeOrder({
         symbol: symbol,
         side: side,
         type: 'MARKET',
-        quantity: quantity,
+        quantity: quantityStr,
         leverage: decision.leverage_suggestion
       });
 

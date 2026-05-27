@@ -3,14 +3,21 @@ import { indicatorEngine } from '../core/market/indicator-engine.js';
 import type { MarketData, AccountStatus } from '../types/market.types.js';
 import { logger } from '../utils/logger.js';
 
+import { env } from '../config/env.js';
+import { TradingStrategy } from '../types/enum.types.js';
+
 export class MarketDataProvider {
   async getMarketData(pair: string): Promise<MarketData> {
     // Pro API uses BTCUSDT format
     const symbol = pair.replace('/', '').replace('-', '');
-    logger.info({ symbol }, 'Fetching real-time market data from ASTERDEX Pro API');
+    
+    // Choose interval based on strategy
+    const interval = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? '5m' : '1h';
+    
+    logger.info({ symbol, interval, strategy: env.TRADING_STRATEGY }, 'Fetching real-time market data from ASTERDEX Pro API');
 
     try {
-      const klines = await asterdexClient.getCandles(symbol);
+      const klines = await asterdexClient.getCandles(symbol, interval);
       const ticker24h = await asterdexClient.getTicker24h(symbol);
       
       // Pro API (Binance format): [0:openTime, 1:open, 2:high, 3:low, 4:close, 5:volume...]

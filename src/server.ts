@@ -11,13 +11,12 @@ import { asterdexClient } from './exchange/asterdex.client.js';
 import { marketDataProvider } from './exchange/market-data.provider.js';
 import { sessionService } from './services/session.service.js';
 import { env } from './config/env.js';
+import type { AccountStatus } from './types/market.types.js';
 import cron from 'node-cron';
 
-let lastScanTimestamp = 0;
-
-async function displayPortfolioSnapshot() {
+async function displayPortfolioSnapshot(status?: AccountStatus) {
   try {
-    const accountStatus = await marketDataProvider.getAccountStatus();
+    const accountStatus = status || await marketDataProvider.getAccountStatus();
     const activePositions = accountStatus.open_positions || [];
 
     logger.info({
@@ -59,48 +58,72 @@ async function displayPortfolioSnapshot() {
   }
 }
 
-async function runTradeScan(mode: SessionMode) {
-  const now = Date.now();
-  if (now - lastScanTimestamp < 60000) return;
-  lastScanTimestamp = now;
-
-  logger.info('--- FULL MARKET Scan Start ---');
+async function startTradingEngine(mode: SessionMode) {
+  logger.info('🚀 TRADING ENGINE STARTED (INFINITE SCAN MODE)');
   
-  try {
-    const accountStatus = await marketDataProvider.getAccountStatus();
-    const dummyDecision = { decision: TradeAction.SKIP } as any;
-    const preScanValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
-    
-    if (preScanValidation.decision === TradeAction.SKIP && preScanValidation.final_summary?.startsWith('Blocked:')) {
-      logger.info({ reason: preScanValidation.final_summary }, 'Scan skipped: Risk manager issued a block.');
-      await displayPortfolioSnapshot();
-      logger.info('--- FULL MARKET Scan End ---');
-      return;
-    }
-
-    const allPairs = await asterdexClient.getAllSymbols();
-    logger.info({ totalPairs: allPairs.length }, 'Scanning entire exchange...');
-    
-    for (const pair of allPairs) {
-      try {
-        logger.info({ pair }, 'Evaluating opportunity...');
-        const decision = await decisionEngine.evaluateTrade(pair, mode);
+  while (true) {
+    try {
+      // 1. Check Account & Risk Status
+      const accountStatus = await marketDataProvider.getAccountStatus();
+      const dummyDecision = { decision: TradeAction.SKIP } as any;
+      const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
+      
+      // 2. If Blocked (Max positions or safety risk), show portfolio and wait
+      if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked:')) {
+        logger.info({ reason: riskValidation.final_summary }, 'Scanning paused: Risk manager block active.');
+        await displayPortfolioSnapshot(accountStatus);
         
-        if (decision.decision !== 'SKIP' && decision.decision !== 'WAIT') {
-          logger.info({ pair, decision: decision.decision }, 'Opportunity found! Executing...');
-          await tradeService.handleTradeDecision(decision, pair);
-          break; 
-        }
-      } catch (error) {
-        logger.error({ pair, error }, 'Scan failed for pair');
+        // Wait 30 seconds before re-checking (don't spam API when blocked)
+        await new Promise(resolve => setTimeout(resolve, 30000));
+        continue;
       }
-    }
 
-  } catch (error) {
-    logger.error({ error }, 'Main scan loop error');
+      // 3. Scan Exchange
+      logger.info('--- CONTINUOUS MARKET SCAN START ---');
+      
+      // Fetch all tickers to filter by volume
+      const allTickers = await asterdexClient.getAllTickers();
+      
+      // Filter top 50 pairs by 24h volume to focus on most liquid/active coins
+      const topPairs = allTickers
+        .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+        .slice(0, 50)
+        .map(t => t.symbol);
+
+      logger.info({ totalFiltered: topPairs.length }, 'Scanning top 50 coins by volume...');
+      
+      for (const pair of topPairs) {
+        try {
+          // Check if position was opened by previous pair in this loop
+          // (Brief check to avoid unnecessary AI calls if limit reached mid-scan)
+          
+          const decision = await decisionEngine.evaluateTrade(pair, mode);
+          
+          if (decision.decision !== 'SKIP' && decision.decision !== 'WAIT') {
+            logger.info({ pair, decision: decision.decision }, 'Opportunity found! Executing...');
+            await tradeService.handleTradeDecision(decision, pair);
+            
+            // Immediately exit symbol loop to re-evaluate account status after a trade
+            break; 
+          }
+          
+          // Small micro-delay between pairs to be API friendly
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+          logger.error({ pair, error }, 'Evaluation failed for pair');
+        }
+      }
+      
+      logger.info('--- CONTINUOUS MARKET SCAN END ---');
+      
+      // Brief pause between full market scans
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+    } catch (error) {
+      logger.error({ error }, 'Trading engine loop error');
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10s on crash
+    }
   }
-  
-  logger.info('--- FULL MARKET Scan End ---');
 }
 
 async function bootstrap() {
@@ -110,20 +133,15 @@ async function bootstrap() {
   const currentMode = SessionMode.NORMAL;
   await sessionService.startNewSession(currentMode);
 
-  logger.info('System initialized. Triggering immediate scan...');
-  runTradeScan(currentMode).catch(err => logger.error({ err }, 'Initial scan failed'));
+  // Start the infinite trading engine
+  startTradingEngine(currentMode).catch(err => logger.fatal({ err }, 'Trading engine fatal error'));
 
-  // 1. Trading Job (Every 5 minutes)
-  cron.schedule('*/5 * * * *', async () => {
-    await runTradeScan(currentMode);
-  });
-
-  // 2. Memory Consolidation Job (Every day at midnight)
+  // Schedule background jobs
   cron.schedule('0 0 * * *', async () => {
     await runMemoryConsolidation();
   });
 
-  logger.info('Jobs scheduled: Trading (5m), Portfolio Monitor (2m), Memory Consolidation (Daily)');
+  logger.info('System initialized. Mode: Continuous Infinite Scan.');
 }
 
 bootstrap().catch((err) => {

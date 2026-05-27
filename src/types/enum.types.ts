@@ -1,3 +1,9 @@
+export enum TradingStrategy {
+  SCALPING = 'SCALPING',
+  INTRADAY = 'INTRADAY',
+  SWING = 'SWING',
+}
+
 export enum TradingMode {
   PAPER = 'PAPER',
   LIVE = 'LIVE',

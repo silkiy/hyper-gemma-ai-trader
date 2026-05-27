@@ -2,12 +2,12 @@ import { z } from 'zod';
 import { TradeAction, MarketRegime, RiskLevel, PositionSize } from '../types/enum.types.js';
 
 export const AIDecisionSchema = z.object({
-  decision: z.nativeEnum(TradeAction),
+  decision: z.preprocess((val: any) => String(val).toUpperCase(), z.nativeEnum(TradeAction)),
   confidence_score: z.number().min(0).max(100),
-  market_regime: z.nativeEnum(MarketRegime),
-  risk_level: z.nativeEnum(RiskLevel),
+  market_regime: z.preprocess((val: any) => String(val).toUpperCase(), z.nativeEnum(MarketRegime)),
+  risk_level: z.preprocess((val: any) => String(val).toUpperCase(), z.nativeEnum(RiskLevel)),
   leverage_suggestion: z.number().min(1).max(500),
-  position_size: z.nativeEnum(PositionSize),
+  position_size: z.preprocess((val: any) => String(val).toUpperCase(), z.nativeEnum(PositionSize)),
   entry_reason: z.string(),
   risk_factors: z.array(z.string()),
   stop_loss_logic: z.string(),

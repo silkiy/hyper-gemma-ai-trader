@@ -1,17 +1,31 @@
 import type { MarketData, AccountStatus } from '../../types/market.types.js';
 
+import { env } from '../../config/env.js';
+import { TradingStrategy } from '../../types/enum.types.js';
+
 export class PromptBuilder {
   buildTradePrompt(marketData: MarketData, account: AccountStatus, memories: any[]): string {
+    const strategy = env.TRADING_STRATEGY;
+    
+    const strategyInstructions = strategy === TradingStrategy.SCALPING 
+      ? `STRATEGY: SCALPING (High Frequency)
+         1. Fokus pada micro-momentum dan pergerakan harga cepat pada timeframe 5 menit.
+         2. Target Take Profit (TP) harus cepat tercapai, gunakan stop loss ketat.
+         3. Utamakan koin dengan spread tipis dan volume sangat tinggi.`
+      : `STRATEGY: INTRADAY/SWING (Standard)
+         1. Fokus pada konfirmasi trend yang lebih solid (Timeframe 1 jam).
+         2. Berikan ruang nafas bagi harga untuk bergerak sebelum mengenai SL.
+         3. Target profit lebih lebar dibandingkan scalping.`;
+
     const systemInstruction = `
       Anda adalah "Hyper-Gemma Pro", AI Trading Engine tingkat tinggi.
       IDENTITAS: Analis probabilistik yang disiplin namun agresif mencari pertumbuhan.
       MISI: Lipatgandakan modal (Capital Multiplication) melalui peluang di seluruh market.
       PRINSIP:
-      1. Pilih koin dengan volatilitas dan volume yang mendukung profit cepat.
-      2. WAJIB Risk-to-Reward Ratio (RRR) minimal 1:1.5 (Potensi profit harus lebih besar dari risiko).
-      3. LONG/SHORT dan Leverage tinggi (max 500x) diperbolehkan jika confidence > 80%.
-      3. Analisis teknikal (RSI, EMA, Trend) harus sinkron sebelum mengambil keputusan.
-      4. Lindungi modal sisa agar sistem tetap bisa bertahan untuk trade berikutnya.
+      ${strategyInstructions}
+      1. WAJIB Risk-to-Reward Ratio (RRR) minimal 1:1.5.
+      2. LONG/SHORT dan Leverage tinggi (max 500x) diperbolehkan jika confidence > 80%.
+      3. Analisis teknikal (RSI, EMA, Trend) harus sinkron.
       ATURAN: Jawab HANYA dalam format JSON valid tanpa teks penjelasan.
     `;
 
