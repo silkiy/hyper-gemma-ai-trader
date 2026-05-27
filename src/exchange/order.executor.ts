@@ -68,6 +68,55 @@ export class OrderExecutor {
 
       const orderId = order.orderId || `aster-pro-${Math.random().toString(36).substr(2, 9)}`;
       logger.info({ orderId }, 'Order executed successfully on ASTERDEX Pro API');
+
+      // 4. Automated Stop Loss & Take Profit (1:1.5 RR)
+      try {
+        const side = decision.decision === TradeAction.LONG ? 'BUY' : 'SELL';
+        const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
+        
+        // Calculate SL/TP prices
+        // Scalping: 1% SL, 1.5% TP (Aggressive)
+        const slPercent = 0.01; 
+        const tpPercent = 0.015;
+        
+        const slPrice = side === 'BUY' 
+          ? price * (1 - slPercent) 
+          : price * (1 + slPercent);
+          
+        const tpPrice = side === 'BUY'
+          ? price * (1 + tpPercent)
+          : price * (1 - tpPercent);
+
+        logger.info({ 
+          slPrice: slPrice.toFixed(precision), 
+          tpPrice: tpPrice.toFixed(precision),
+          rr: '1:1.5'
+        }, 'Placing automated SL/TP orders...');
+
+        // Place Stop Loss
+        await asterdexClient.placeOrder({
+          symbol: symbol,
+          side: closeSide,
+          type: 'STOP_MARKET',
+          quantity: quantityStr,
+          stopPrice: slPrice.toFixed(precision),
+          reduceOnly: true
+        });
+
+        // Place Take Profit
+        await asterdexClient.placeOrder({
+          symbol: symbol,
+          side: closeSide,
+          type: 'TAKE_PROFIT_MARKET',
+          quantity: quantityStr,
+          stopPrice: tpPrice.toFixed(precision),
+          reduceOnly: true
+        });
+
+        logger.info('SL/TP orders placed successfully.');
+      } catch (sltpError) {
+        logger.warn({ sltpError }, 'Failed to place automated SL/TP orders. Position is open WITHOUT protection!');
+      }
       
       return { orderId, status: 'FILLED', price };
     } catch (error) {

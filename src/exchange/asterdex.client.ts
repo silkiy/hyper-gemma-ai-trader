@@ -184,10 +184,12 @@ export class AsterdexClient {
   async placeOrder(order: {
     symbol: string;
     side: 'BUY' | 'SELL';
-    type: 'LIMIT' | 'MARKET';
+    type: 'LIMIT' | 'MARKET' | 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
     quantity: string;
     price?: string;
+    stopPrice?: string;
     leverage?: number;
+    reduceOnly?: boolean;
   }) {
     if (order.leverage) {
       await this.setLeverage(order.symbol, order.leverage);
@@ -209,6 +211,14 @@ export class AsterdexClient {
     if (order.type === 'LIMIT' && order.price) {
       params.price = order.price;
       params.timeInForce = 'GTC';
+    }
+
+    if (order.stopPrice) {
+      params.stopPrice = order.stopPrice;
+    }
+
+    if (order.reduceOnly) {
+      params.reduceOnly = 'true';
     }
 
     // Sort keys to ensure consistent signature
