@@ -35,7 +35,7 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    SERVER (Entry Point)               │
-│          Infinite Trading Engine + Bootstrap          │
+│      Dual-Engine Architecture + Strategy Router        │
 ├──────────┬──────────┬──────────┬────────────────────┤
 │   API    │  CORE    │ EXCHANGE │    SERVICES         │
 │ (Fastify)│ (AI/Risk)│(AsterDex)│  (Trade Orchestr.)  │
@@ -51,8 +51,9 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ### Arsitektur Detail:
 
 - **Clean Architecture** — Pemisahan antara Core, Services, Database, dan Exchange
-- **Infinite Scan Loop** — Continuous trading engine yang berjalan tanpa henti, bukan cron-based
-- **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING)
+- **Infinite Scan Loop** — Continuous trading engine untuk SCALPING (infinite loop)
+- **Scheduled Scan** — Cron-based engine untuk INTRADAY (15m) dan SWING (1h)
+- **Strategy-Driven** — Engine otomatis dipilih berdasarkan `TRADING_STRATEGY`
 - **AI Feedback Loop** — Hasil trading sebelumnya diinjeksikan ke prompt AI
 - **Self-Learning Memory** — MongoDB menyimpan pelajaran dari kesalahan
 - **Risk First Trading System** — Risk Manager sebagai penjaga terakhir sebelum eksekusi
@@ -83,7 +84,7 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ```
 hyper-gemma-ai-trader/
 ├── src/
-│   ├── server.ts                    # Entry point utama (bootstrap + infinite trading engine)
+│   ├── server.ts                    # Entry point utama (bootstrap + dual-engine + strategy router)
 │   ├── core/                        # Logika inti (AI, Market, Risk)
 │   │   ├── ai/
 │   │   │   ├── decision-engine.ts   # Orkestrator keputusan trading AI
@@ -222,14 +223,16 @@ Client HTTP yang terhubung ke Ollama API untuk inference model Gemma secara loka
 Membangun prompt terstruktur dalam Bahasa Indonesia untuk model Gemma:
 
 - **Strategy-Adaptive Prompt** — Instruksi berbeda berdasarkan `TRADING_STRATEGY`:
-  - `SCALPING` → Fokus micro-momentum, timeframe 5 menit, TP cepat, SL ketat, volume tinggi
-  - `INTRADAY/SWING` → Konfirmasi trend solid, timeframe 1 jam, ruang nafas untuk SL, target profit lebar
-- **System Instruction** — Persona "Hyper-Gemma Pro" sebagai AI Trading Engine
+  - `SCALPING` → **Aggressive Scalping** — fokus Volatility Bursts, Volume Spikes, Price Anomalies, profit instan
+  - `INTRADAY/SWING` → Konfirmasi trend solid, ruang nafas untuk SL, target profit lebar
+- **System Instruction** — Persona **"Hyper-Gemma Ultra"** sebagai AI Scalping Engine agresif
+- **Small Account Optimization** — Instruksi leverage 50x-200x khusus akun $1 agar memenuhi minimum order $5
+- **Tight SL/TP Instruction** — Wajib memberikan target SL/TP dalam % pergerakan harga yang ketat
 - **Account Context** — Menyertakan equity, PnL harian, dan loss streak
 - **Market Context** — Menyertakan harga, EMA20/50, RSI, trend, ATR, dan 24h change
 - **Memory Injection** — Menyuntikkan pelajaran dari trading sebelumnya
 - **Response Schema** — Memaksa output JSON dengan format ketat
-- **Prinsip Capital Multiplication** — Mencari peluang profit di seluruh market
+- **Prinsip Capital Multiplication** — Eksekusi peluang dengan probabilitas profit tertinggi
 
 ---
 
@@ -287,14 +290,17 @@ Mengklasifikasikan kondisi market saat ini berdasarkan indikator:
 Layer perlindungan modal yang dapat meng-override keputusan AI:
 
 - **Dynamic Max Positions** — Membatasi jumlah posisi aktif berdasarkan `MAX_POSITIONS` di environment (default: 2, configurable)
-- **Liquidation Safety Check** — Memblokir pembukaan posisi baru jika posisi existing terlalu dekat dengan harga likuidasi (threshold: 30% distance)
+- **Duplicate Position Block** — Memblokir pembukaan posisi baru pada koin yang sudah dipegang (cegah double exposure)
+- **Strategy-Dynamic Liquidation Safety** — Threshold likuidasi berbeda per strategi:
+  - `SCALPING` → 15% jarak minimum ke harga likuidasi (lebih toleran karena leverage tinggi)
+  - `INTRADAY/SWING` → 30% jarak minimum (lebih konservatif)
 - **Leverage Cap** — Membatasi leverage hingga maksimal 500x
 - **Position Sizing** — Kalkulasi ukuran posisi berdasarkan tingkat risiko:
   - `NORMAL` → 100% dari safe margin
   - `REDUCED` → 50% dari safe margin
   - `SMALL` → 25% dari safe margin
 - **Active Position Monitor** — Menampilkan detail posisi aktif (PnL, entry price, margin, ROE, liquidation price)
-- **Trading Blocked** — Memblokir trade baru jika posisi penuh atau ada safety risk
+- **Trading Blocked** — Memblokir trade baru jika posisi penuh, ada safety risk, atau duplicate coin
 
 ---
 
@@ -322,16 +328,17 @@ Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
 | **EIP-712 Signing** | Tanda tangan kriptografis menggunakan `ethers.js` Wallet |
 | **Get Candles** | Mengambil data candlestick (klines) untuk analisis |
 | **Get Ticker 24h** | Mengambil statistik harga 24 jam per simbol |
-| **Get All Tickers** | Mengambil semua 24h ticker sekaligus (untuk volume-based filtering) |
+| **Get All Tickers** | Mengambil semua 24h ticker sekaligus (untuk hot pair filtering) |
 | **Get Exchange Info** | Mengambil informasi exchange (symbols, precision, status) |
 | **Get All Symbols** | Mengambil semua pasangan trading yang aktif |
+| **Get Symbol Info** | Mengambil `quantityPrecision` dan `pricePrecision` per simbol (baru) |
 | **Get Account Balance** | Mengambil saldo akun (USDC/USDT) |
 | **Get Account Info** | Mengambil informasi akun lengkap (future-proof V3) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
 | **Place Order** | Membuat order MARKET, LIMIT, STOP_MARKET, atau TAKE_PROFIT_MARKET (dengan stopPrice & reduceOnly) |
-| **Set Leverage** | Mengatur leverage per simbol |
+| **Set Leverage** | Mengatur leverage per simbol (smart error handling: ignore -4028, throw -2027) |
 | **Set Margin Type** | Mengatur tipe margin (CROSSED/ISOLATED) |
-| **Get Symbol Precision** | Mengambil presisi kuantitas via Exchange Info |
+| **Get Symbol Precision** | Shortcut ke `getSymbolInfo().quantityPrecision` |
 
 **Autentikasi:**
 - Menggunakan **EIP-712 Typed Data** signing
@@ -362,19 +369,25 @@ Aggregator data market yang menggabungkan raw data dari exchange dengan indikato
 
 **File:** `src/exchange/order.executor.ts`
 
-Mengeksekusi order ke exchange AsterDex dengan proteksi otomatis:
+Mengeksekusi order ke exchange AsterDex dengan proteksi otomatis dan optimisasi leverage:
 
 - **Min Notional** — Memastikan nilai order minimal $5.1 (memenuhi minimum exchange $5)
 - **Dynamic Quantity** — Menghitung kuantitas berdasarkan harga terkini dan presisi simbol
-- **Pre-Check Margin Validation** — Memvalidasi apakah available balance mencukupi **sebelum** mengirim order
-- **Auto Leverage** — Mengatur leverage sebelum membuat order
+- **Dual Precision** — Menggunakan `quantityPrecision` untuk kuantitas dan `pricePrecision` untuk harga SL/TP
+- **Auto-Leverage Optimization** — Sistem otomatis menaikkan leverage jika saran AI terlalu rendah untuk memenuhi margin minimum:
+  - Menghitung leverage minimum yang dibutuhkan: `ceil(minNotional / (available * 0.9))`
+  - Auto-increase jika leverage AI < minimum yang dibutuhkan
+- **Asset-Class Leverage Cap** — Membatasi leverage berdasarkan jenis aset:
+  - BTC/ETH (major) → max 200x
+  - Altcoins → max 50x
+- **20% Margin Buffer** — Menambahkan 20% buffer pada kalkulasi margin untuk fees, slippage, dan minimum wallet
 - **Auto Margin** — Memaksa CROSSED margin type
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
 - **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
-- **Automated Stop Loss & Take Profit** — Setelah order utama tereksekusi, otomatis memasang:
-  - `STOP_MARKET` (SL) — 1% dari entry price (reduceOnly)
-  - `TAKE_PROFIT_MARKET` (TP) — 1.5% dari entry price (reduceOnly)
-  - Risk-to-Reward Ratio: **1:1.5**
+- **Strategy-Dynamic Stop Loss & Take Profit** — Setelah order utama tereksekusi, otomatis memasang SL/TP berdasarkan strategi:
+  - `SCALPING` → SL 0.5%, TP 0.75% (RR 1:1.5)
+  - `INTRADAY` → SL 1%, TP 1.5% (RR 1:1.5)
+  - `SWING` → SL 3%, TP 10% (RR 1:3.3)
   - Graceful fallback jika SL/TP gagal (warning log, posisi tetap terbuka)
 
 ---
@@ -466,37 +479,40 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 
 ---
 
-### 16. ♾️ Infinite Trading Engine & Background Jobs
+### 16. ♾️ Dual-Engine Trading Architecture & Background Jobs
 
-**Arsitektur baru:** Trading engine berjalan sebagai **infinite continuous loop** (bukan cron-based), memberikan respons tercepat terhadap peluang market.
+**Arsitektur dual-engine:** Engine otomatis dipilih berdasarkan `TRADING_STRATEGY` yang dikonfigurasi.
 
-| Komponen | Tipe | Deskripsi |
-|----------|------|-----------|
-| **Trading Engine** | Infinite Loop | Scan market secara terus-menerus tanpa interval tetap |
-| **Memory Consolidation** | Cron (`0 0 * * *`) | Mengkonsolidasi memori dan pelajaran harian |
+| Komponen | Tipe | Strategi | Deskripsi |
+|----------|------|----------|-----------|
+| **Infinite Loop** | `while(true)` | SCALPING | Scan market non-stop dengan hot pair filtering |
+| **Scheduled Scan** | Cron `*/15 * * * *` | INTRADAY | Scan setiap 15 menit + initial scan on startup |
+| **Scheduled Scan** | Cron `0 * * * *` | SWING | Scan setiap 1 jam + initial scan on startup |
+| **Memory Consolidation** | Cron `0 0 * * *` | Semua | Mengkonsolidasi memori dan pelajaran harian |
 
-**Trading Engine Loop:**
+**Reusable `runMarketScan(mode)`** — Fungsi scan terpisah yang dapat dipanggil dari infinite loop maupun cron:
 ```
-while (true) {
+runMarketScan(mode) {
   1. Cek Account & Risk Status
-  2. Jika Blocked → Portfolio Snapshot → Wait 30s → Retry
-  3. Fetch All Trading Symbols dari Exchange
+  2. Jika Blocked → Portfolio Snapshot → return false
+  3. Fetch All Tickers → Filter Hot Pairs:
+     - SCALPING: |priceChange| > 2% ATAU volume > $1M, sorted by volume
+     - INTRADAY/SWING: Semua pair, sorted by volume
   4. Loop setiap pair:
      - Evaluate via AI Decision Engine
      - Jika peluang → Execute
-       - Sukses? → Break (re-evaluate account)
-       - Gagal (margin kurang)? → Lanjut ke pair berikutnya
-     - Micro-delay 100ms antar pair (API friendly)
-  5. Brief pause 1s → Ulang dari step 1
-  * On crash → Wait 10s → Retry
+       - Sukses? → return true (stop scanning)
+       - Gagal? → Lanjut ke pair berikutnya
+     - Micro-delay 100ms antar pair
+  5. return true (scan selesai)
 }
 ```
 
 **Engine Features:**
-- **Full Exchange Scan** — Memindai seluruh pasangan trading aktif di exchange
-- **Smart Execution Continue** — Jika eksekusi gagal (misal margin kurang), lanjut scan pair berikutnya alih-alih berhenti
-- **Smart Blocking** — Saat posisi penuh atau ada safety risk, wait 30s (bukan spam API)
-- **Crash Recovery** — Jika terjadi error, tunggu 10s lalu otomatis restart loop
+- **Hot Pair Filtering (SCALPING)** — Hanya scan koin dengan volatilitas tinggi (>2% change) atau volume besar (>$1M)
+- **Volume-Sorted Scanning** — Semua strategi memproses pair dari volume tertinggi ke terendah
+- **Smart Execution Continue** — Jika eksekusi gagal (misal margin kurang), lanjut scan pair berikutnya
+- **Smart Blocking** — Saat posisi penuh atau ada safety risk, return false (bukan spam API)
 - **Conditional Break** — Hanya break dari loop scan jika trade benar-benar berhasil dieksekusi
 - **API-Friendly** — Micro-delay 100ms antar pair evaluation untuk menghindari rate limit
 - **Reusable Portfolio Snapshot** — Fungsi `displayPortfolioSnapshot(status?)` yang menerima optional parameter:
@@ -596,29 +612,33 @@ Mengelola lifecycle sesi trading:
 ```
  0. 🚀 Bootstrap: Connect DB → Start API → Init Session
          │
- 1. ♾️ Start Infinite Trading Engine
+ 1. 🎯 Strategy Router:
+         ├─ SCALPING → startInfiniteLoop() [while(true)]
+         ├─ INTRADAY → startScheduledTasks() [cron */15 * * * *]
+         └─ SWING    → startScheduledTasks() [cron 0 * * * *]
          │
- ┌───────┤ CONTINUOUS LOOP (while true)
+ ┌───────┤ runMarketScan(mode)
  │       │
  │  2. 🛡️ Account & Risk Check
- │       │     └─ Jika blocked → Portfolio Snapshot → Wait 30s → Retry
+ │       │     └─ Jika blocked → Portfolio Snapshot → return false
  │       │
- │  3. 📡 Fetch All Trading Symbols dari Exchange
+ │  3. 📡 Fetch All Tickers → Filter Hot Pairs (strategy-based)
+ │       │     SCALPING: |change| > 2% OR volume > $1M
+ │       │     INTRADAY/SWING: Semua, sorted by volume
  │       │
- │  4. 🔁 Loop semua pairs:
+ │  4. 🔁 Loop hot pairs:
  │       │     ├─ 📊 Fetch market data (price, EMA, RSI, ATR)
- │       │     ├─ 🛡️ Pre-AI Risk Check → Skip AI jika posisi penuh
+ │       │     ├─ 🛡️ Pre-AI Risk Check (posisi penuh / duplicate coin)
  │       │     ├─ 📚 Load memory (5 trade terakhir)
- │       │     ├─ 📝 Build strategy-adaptive prompt (SCALPING/INTRADAY)
+ │       │     ├─ 📝 Build strategy-adaptive prompt (Ultra Scalping/Standard)
  │       │     ├─ 🤖 Kirim ke Ollama/Gemma4 → terima JSON
  │       │     ├─ ✅ Validasi JSON terhadap Zod schema
  │       │     ├─ 🛡️ Final Risk Validation (leverage cap)
- │       │     ├─ 💹 Eksekusi order → Simpan ke DB dengan session ID
- │       │     ├─ ✅ Sukses? → Break (re-evaluate account)
+ │       │     ├─ 💹 Auto-Leverage Optimization → Asset-Class Cap
+ │       │     ├─ 💹 Eksekusi order → Auto SL/TP → Simpan ke DB
+ │       │     ├─ ✅ Sukses? → return true (stop scanning)
  │       │     ├─ ❌ Gagal? → Lanjut ke pair berikutnya
  │       │     └─ ⏱️ Micro-delay 100ms (API friendly)
- │       │
- │  5. ⏱️ Brief pause 1s → Kembali ke step 2
  │       │
  └───────┘
 
@@ -690,16 +710,20 @@ npm run backtest     # Jalankan backtesting
 
 ### ✅ Sudah Diimplementasi
 - [x] AI Decision Engine dengan Gemma 4
-- [x] **Infinite Continuous Trading Engine** (menggantikan cron 5 menit)
+- [x] **Dual-Engine Architecture** (Infinite Loop SCALPING / Cron INTRADAY 15m / Cron SWING 1h)
+- [x] **Hot Pair Filtering** (volatilitas >2% atau volume >$1M untuk SCALPING)
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
-- [x] **Full Exchange Scan** (seluruh pasangan trading aktif)
 - [x] **Smart Execution Continue** (lanjut scan jika eksekusi gagal)
+- [x] **Auto-Leverage Optimization** (auto-increase leverage untuk memenuhi margin minimum)
+- [x] **Asset-Class Leverage Cap** (BTC/ETH max 200x, altcoins max 50x)
+- [x] **Strategy-Dynamic SL/TP** (SCALPING 0.5%/0.75%, INTRADAY 1%/1.5%, SWING 3%/10%)
+- [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
+- [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
 - [x] **Smart Blocking & Crash Recovery** (30s wait / 10s retry)
 - [x] Integrasi AsterDex V3 API (EIP-712)
 - [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
 - [x] Risk Management & Leverage Cap
 - [x] Dynamic Max Positions (configurable via `MAX_POSITIONS`)
-- [x] Liquidation Safety Check (30% threshold)
 - [x] Pre-AI Risk Validation (skip AI jika posisi penuh)
 - [x] Session Management (lifecycle tracking)
 - [x] Reusable Portfolio Snapshot (equity, margin, ROE, liq price)
@@ -712,9 +736,9 @@ npm run backtest     # Jalankan backtesting
 - [x] Monitoring API (Prometheus + Fastify)
 - [x] Backtesting & Simulation
 - [x] Comprehensive Type Safety (Zod + TypeScript)
-- [x] **Automated Stop Loss & Take Profit** (1:1.5 RR, STOP_MARKET / TAKE_PROFIT_MARKET)
-- [x] **Pre-Check Margin Validation** (cek saldo sebelum order)
+- [x] **Pre-Check Margin Validation** (20% buffer untuk fees & slippage)
 - [x] **Strategy-Adaptive Timeframe** (5m SCALPING, 1h INTRADAY/SWING)
+- [x] **Dual Precision** (quantityPrecision + pricePrecision dari exchange)
 
 ### 🔜 Rencana Pengembangan
 - [ ] Multi-agent trading
