@@ -65,7 +65,7 @@ async function startTradingEngine(mode: SessionMode) {
     try {
       // 1. Check Account & Risk Status
       const accountStatus = await marketDataProvider.getAccountStatus();
-      const dummyDecision = { decision: TradeAction.SKIP } as any;
+      const dummyDecision = { decision: TradeAction.SKIP, final_summary: 'PRE_SCAN_CHECK' } as any;
       const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
       
       // 2. If Blocked (Max positions or safety risk), show portfolio and wait
@@ -73,17 +73,30 @@ async function startTradingEngine(mode: SessionMode) {
         logger.info({ reason: riskValidation.final_summary }, 'Scanning paused: Risk manager block active.');
         await displayPortfolioSnapshot(accountStatus);
         
-        // Wait 30 seconds before re-checking (don't spam API when blocked)
-        await new Promise(resolve => setTimeout(resolve, 30000));
+        // Wait 10 seconds before re-checking (don't spam API when blocked)
+        await new Promise(resolve => setTimeout(resolve, 10000));
         continue;
       }
 
       // 3. Scan Exchange
       logger.info('--- CONTINUOUS MARKET SCAN START ---');
-      const allPairs = await asterdexClient.getAllSymbols();
-      logger.info({ totalPairs: allPairs.length }, 'Scanning entire exchange...');
+      // Fetch all tickers to filter by activity
+      const allTickers = await asterdexClient.getAllTickers();
       
-      for (const pair of allPairs) {
+      // Filter: Only coins with > 2% move in 24h OR high volume spike
+      // This ensures we only call AI for coins that are actually "moving"
+      const hotPairs = allTickers
+        .filter(t => {
+          const change = Math.abs(parseFloat(t.priceChangePercent || '0'));
+          const volume = parseFloat(t.volume || '0');
+          return change > 2.0 || volume > 1000000; // Adjust thresholds as needed
+        })
+        .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+        .map(t => t.symbol);
+
+      logger.info({ totalHot: hotPairs.length }, 'Scanning high-velocity coins only...');
+      
+      for (const pair of hotPairs) {
         try {
           // Check if position was opened by previous pair in this loop
           // (Brief check to avoid unnecessary AI calls if limit reached mid-scan)

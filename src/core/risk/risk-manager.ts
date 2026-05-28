@@ -1,5 +1,5 @@
 import type { AIDecision } from '../../types/ai.types.js';
-import { TradeAction, RiskLevel, PositionSize, SessionMode } from '../../types/enum.types.js';
+import { TradeAction, RiskLevel, PositionSize, SessionMode, TradingStrategy } from '../../types/enum.types.js';
 import { logger } from '../../utils/logger.js';
 import type { AccountStatus } from '../../types/market.types.js';
 
@@ -10,13 +10,17 @@ export class RiskManager {
   private maxRiskPerTradePercent = 100; 
   private maxLeverage = 500; 
   private minConfidenceScore = 40; 
-  private liqSafetyThreshold = 30; // 30% distance to liquidation is considered "safe"
+
+  private getLiqSafetyThreshold(): number {
+    return env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 15 : 30;
+  }
 
   validateDecision(decision: AIDecision, account: AccountStatus, currentMode: SessionMode): AIDecision {
     logger.info('Validating trade decision against risk rules (DYNAMIC LEVERAGE MODE)');
 
     // 0. Check for existing positions (Dynamic Limit)
     const activePositions = account.open_positions || [];
+    const threshold = this.getLiqSafetyThreshold();
     
     if (activePositions.length >= env.MAX_POSITIONS) {
       logger.warn({ 
@@ -31,20 +35,30 @@ export class RiskManager {
       };
     }
 
-    // 0.1 Check for "Liquidation Safety" of existing positions
-    // If any existing position is too close to liquidation, don't open new ones.
+    // 0.1 Check for existing positions details
     for (const pos of activePositions) {
+      // RULE: Do not add size to the same coin
+      // If we are checking a real trade decision (not a pre-scan check)
+      if (decision.final_summary !== 'PRE_SCAN_CHECK' && pos.symbol === (decision as any).symbol) {
+        logger.warn({ symbol: pos.symbol }, 'TRADING BLOCKED: You already have a position in this coin.');
+        return { 
+          ...decision, 
+          decision: TradeAction.SKIP, 
+          final_summary: `Blocked: Already holding ${pos.symbol}` 
+        };
+      }
+
       const markPrice = parseFloat(pos.markPrice || '0');
       const liqPrice = parseFloat(pos.liquidationPrice || '0');
       
       if (markPrice > 0 && liqPrice > 0) {
         const liqDistance = Math.abs((markPrice - liqPrice) / markPrice) * 100;
         
-        if (liqDistance < this.liqSafetyThreshold) {
+        if (liqDistance < threshold) {
           logger.warn({
             symbol: pos.symbol,
             liqDistance: `${liqDistance.toFixed(2)}%`,
-            threshold: `${this.liqSafetyThreshold}%`
+            threshold: `${threshold}%`
           }, 'TRADING BLOCKED: Existing position is too close to liquidation price.');
           
           return { 

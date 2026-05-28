@@ -3,6 +3,7 @@ import type { AIDecision } from '../types/ai.types.js';
 import { logger } from '../utils/logger.js';
 import { TradeAction } from '../types/enum.types.js';
 import { marketDataProvider } from './market-data.provider.js';
+import { env } from '../config/env.js';
 
 export class OrderExecutor {
   private readonly MIN_NOTIONAL = 5.1; // $5.1 to be safe against exchange min $5
@@ -69,16 +70,24 @@ export class OrderExecutor {
       const orderId = order.orderId || `aster-pro-${Math.random().toString(36).substr(2, 9)}`;
       logger.info({ orderId }, 'Order executed successfully on ASTERDEX Pro API');
 
-      // 4. Automated Stop Loss & Take Profit (1:1.5 RR)
+      // 4. Automated Stop Loss & Take Profit (Dynamic based on Strategy)
       try {
         const side = decision.decision === TradeAction.LONG ? 'BUY' : 'SELL';
         const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
         
-        // Calculate SL/TP prices
-        // Scalping: 1% SL, 1.5% TP (Aggressive)
-        const slPercent = 0.01; 
-        const tpPercent = 0.015;
-        
+        // Define strategy-based percentages
+        let slPercent = 0.01; // 1% default
+        let tpPercent = 0.015; // 1.5% default
+
+        const strategy = env.TRADING_STRATEGY;
+        if (strategy === 'SCALPING') {
+          slPercent = 0.005; // 0.5% SL
+          tpPercent = 0.0075; // 0.75% TP
+        } else if (strategy === 'SWING') {
+          slPercent = 0.03; // 3% SL
+          tpPercent = 0.10; // 10% TP
+        }
+
         const slPrice = side === 'BUY' 
           ? price * (1 - slPercent) 
           : price * (1 + slPercent);
@@ -88,9 +97,10 @@ export class OrderExecutor {
           : price * (1 - tpPercent);
 
         logger.info({ 
+          strategy,
           slPrice: slPrice.toFixed(precision), 
           tpPrice: tpPrice.toFixed(precision),
-          rr: '1:1.5'
+          rr: `1:${(tpPercent / slPercent).toFixed(1)}`
         }, 'Placing automated SL/TP orders...');
 
         // Place Stop Loss

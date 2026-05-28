@@ -27,7 +27,7 @@ export class DecisionEngine {
       const recentTrades = await tradeRepository.findRecent(10);
       
       // 3. Pre-AI Risk Check (Stop early if positions are full or safety risk exists)
-      const riskValidation = riskManager.validateDecision({ decision: TradeAction.SKIP } as any, accountStatus, currentMode);
+      const riskValidation = riskManager.validateDecision({ decision: TradeAction.SKIP, symbol: pair } as any, accountStatus, currentMode);
       if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked:')) {
         logger.info({ reason: riskValidation.final_summary }, 'Skipping AI analysis: Risk manager issued a block');
         return riskValidation;
