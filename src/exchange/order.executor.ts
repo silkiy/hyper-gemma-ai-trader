@@ -28,8 +28,10 @@ export class OrderExecutor {
       const accountStatus = await marketDataProvider.getAccountStatus();
 
       // 3. Calculate Quantity to meet MIN_NOTIONAL ($5)
-      // Fetch precision for the symbol
-      const precision = await asterdexClient.getSymbolPrecision(symbol);
+      // Fetch precision info for the symbol
+      const symbolInfo = await asterdexClient.getSymbolInfo(symbol);
+      const precision = symbolInfo.quantityPrecision;
+      const pricePrecision = symbolInfo.pricePrecision;
       
       const rawQuantity = this.MIN_NOTIONAL / price;
       
@@ -38,12 +40,34 @@ export class OrderExecutor {
       const quantityStr = (Math.ceil(rawQuantity * multiplier) / multiplier).toFixed(precision);
       const quantity = parseFloat(quantityStr);
       
-      // PRE-CHECK: Can we afford this with our current available balance?
-      const requiredMargin = (quantity * price) / decision.leverage_suggestion;
+      // PRE-CHECK & AUTO-LEVERAGE OPTIMIZATION
       const available = accountStatus.available_balance || 0;
+      const minNotional = this.MIN_NOTIONAL;
+      let leverage = decision.leverage_suggestion;
+
+      // 1. Calculate minimum leverage needed to afford this trade
+      // (minNotional / leverage) must be <= available balance
+      const minNeededLeverage = Math.ceil(minNotional / (available * 0.9)); // 10% buffer
       
-      if (requiredMargin > available) {
-        const errorMsg = `Insufficient Margin for minimum trade size on ${symbol}. Need $${requiredMargin.toFixed(4)}, but have $${available.toFixed(4)}`;
+      if (leverage < minNeededLeverage) {
+        logger.info({ suggested: leverage, required: minNeededLeverage }, 'Auto-increasing leverage to meet minimum margin requirements');
+        leverage = minNeededLeverage;
+      }
+
+      // 2. Cap leverage for altcoins (BTC/ETH can go higher, others usually max 50x-75x)
+      const isMajor = symbol.startsWith('BTC') || symbol.startsWith('ETH');
+      const maxSafeLeverage = isMajor ? 200 : 50;
+      
+      if (leverage > maxSafeLeverage) {
+        logger.info({ requested: leverage, capped: maxSafeLeverage }, 'Capping leverage to safe exchange limits');
+        leverage = maxSafeLeverage;
+      }
+
+      // 3. Final check: Can we actually afford this now?
+      // Add a 20% buffer to account for exchange fees, slippage and minimum wallet requirements
+      const finalRequiredMargin = (minNotional / leverage) * 1.20;
+      if (finalRequiredMargin > available) {
+        const errorMsg = `Margin unsafe for ${symbol}. Need ~$${finalRequiredMargin.toFixed(4)} (inc. buffer), have $${available.toFixed(4)}`;
         logger.warn(errorMsg);
         throw new Error(errorMsg);
       }
@@ -52,19 +76,19 @@ export class OrderExecutor {
       const side = decision.decision === TradeAction.LONG ? 'BUY' : 'SELL';
       
       logger.info({ 
-        targetNotional: this.MIN_NOTIONAL, 
+        targetNotional: minNotional, 
         calcQuantity: quantityStr, 
-        price,
-        estimatedMargin: requiredMargin.toFixed(4),
+        finalLeverage: leverage,
+        estimatedMargin: finalRequiredMargin.toFixed(4),
         availableBalance: available.toFixed(4)
-      }, 'Order calculation complete');
+      }, 'Order calculation complete (Optimized)');
 
       const order = await asterdexClient.placeOrder({
         symbol: symbol,
         side: side,
         type: 'MARKET',
         quantity: quantityStr,
-        leverage: decision.leverage_suggestion
+        leverage: leverage
       });
 
       const orderId = order.orderId || `aster-pro-${Math.random().toString(36).substr(2, 9)}`;
@@ -98,8 +122,8 @@ export class OrderExecutor {
 
         logger.info({ 
           strategy,
-          slPrice: slPrice.toFixed(precision), 
-          tpPrice: tpPrice.toFixed(precision),
+          slPrice: slPrice.toFixed(pricePrecision), 
+          tpPrice: tpPrice.toFixed(pricePrecision),
           rr: `1:${(tpPercent / slPercent).toFixed(1)}`
         }, 'Placing automated SL/TP orders...');
 
@@ -109,7 +133,7 @@ export class OrderExecutor {
           side: closeSide,
           type: 'STOP_MARKET',
           quantity: quantityStr,
-          stopPrice: slPrice.toFixed(precision),
+          stopPrice: slPrice.toFixed(pricePrecision),
           reduceOnly: true
         });
 
@@ -119,7 +143,7 @@ export class OrderExecutor {
           side: closeSide,
           type: 'TAKE_PROFIT_MARKET',
           quantity: quantityStr,
-          stopPrice: tpPrice.toFixed(precision),
+          stopPrice: tpPrice.toFixed(pricePrecision),
           reduceOnly: true
         });
 

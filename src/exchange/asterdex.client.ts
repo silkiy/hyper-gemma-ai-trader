@@ -68,15 +68,26 @@ export class AsterdexClient {
     }
   }
 
-  async getSymbolPrecision(symbol: string): Promise<number> {
+  async getSymbolInfo(symbol: string): Promise<{ quantityPrecision: number; pricePrecision: number }> {
     const cleanSymbol = symbol.replace('-', '').replace('/', '');
     try {
       const info = await this.getExchangeInfo();
       const symbolInfo = info.symbols.find((s: any) => s.symbol === cleanSymbol);
-      return symbolInfo ? symbolInfo.quantityPrecision : 3; // Default to 3 if not found
+      if (symbolInfo) {
+        return {
+          quantityPrecision: symbolInfo.quantityPrecision,
+          pricePrecision: symbolInfo.pricePrecision || symbolInfo.quotePrecision || 8
+        };
+      }
+      return { quantityPrecision: 3, pricePrecision: 8 }; // Fallback
     } catch (e) {
-      return 3; // Fallback
+      return { quantityPrecision: 3, pricePrecision: 8 }; // Fallback
     }
+  }
+
+  async getSymbolPrecision(symbol: string): Promise<number> {
+    const info = await this.getSymbolInfo(symbol);
+    return info.quantityPrecision;
   }
 
   async getTicker24h(symbol: string) {
@@ -231,16 +242,16 @@ export class AsterdexClient {
     
     try {
       const url = `${this.baseUrl}/fapi/v3/order?${sortedQueryString}&signature=${signature}`;
-      // V3 POST usually sends params in URL or body? 
-      // Documentation says "Parameters must be sent as a query string" for GET.
-      // For POST "send data in the request body (content type application/x-www-form-urlencoded)"
-      // But the example shows appending it to URL. Let's try appending to URL first as it's common in DEX APIs.
       const response = await axios.post(url, null, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
       return response.data;
-    } catch (error) {
-      logger.error({ order, error }, 'Failed to place order on ASTERDEX Pro API');
+    } catch (error: any) {
+      const exchangeError = error.response?.data || { message: error.message };
+      logger.error({ 
+        symbol: order.symbol, 
+        error: exchangeError 
+      }, 'Failed to place order on ASTERDEX Pro API');
       throw error;
     }
   }
@@ -261,8 +272,21 @@ export class AsterdexClient {
 
     try {
       await axios.post(`${this.baseUrl}/fapi/v3/leverage?${queryString}&signature=${signature}`);
-    } catch (error) {
-      logger.warn({ symbol, leverage }, 'Failed to set leverage (might already be set)');
+    } catch (error: any) {
+      // If error is code -4028 (leverage already set to this value), we can ignore it.
+      // But if it's -2027 (leverage too high), we MUST throw.
+      const exchangeData = error.response?.data;
+      if (exchangeData?.code === -4028) {
+        logger.info({ symbol, leverage }, 'Leverage already set to target value');
+        return;
+      }
+      
+      logger.error({ 
+        symbol, 
+        leverage, 
+        response: exchangeData 
+      }, 'Failed to set leverage on exchange. Trade cannot proceed safely.');
+      throw new Error(`Failed to set leverage to ${leverage}x: ${exchangeData?.msg || error.message}`);
     }
   }
 
