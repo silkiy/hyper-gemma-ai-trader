@@ -1,9 +1,9 @@
 # 🤖 Hyper-Gemma AI Trader
 
 > **Production-ready Autonomous AI Trading System**
-> Menggunakan AsterDex, Ollama, Gemma, MongoDB, Node.js, dan TypeScript
+> Menggunakan Bitget Futures, Ollama, Gemma 4, MongoDB, Node.js, dan TypeScript
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue)](#)
 [![Node.js](https://img.shields.io/badge/Node.js-LTS-green)](#)
@@ -12,36 +12,37 @@
 
 ## 📖 Deskripsi Project
 
-**Hyper-Gemma AI Trader** adalah sistem trading cryptocurrency **otonom sepenuhnya** (fully autonomous) yang menggunakan kecerdasan buatan (AI) berbasis model **Gemma** melalui **Ollama** untuk mengambil keputusan trading pada exchange **AsterDex** secara real-time.
+**Hyper-Gemma AI Trader** adalah sistem trading cryptocurrency **otonom sepenuhnya** (fully autonomous) yang menggabungkan kecerdasan buatan **Gemma 4** (via Ollama) dengan **Quantitative Mathematics Engine** untuk trading futures di **Bitget Exchange** secara real-time.
 
-Sistem ini dirancang dengan prinsip **"Risk First"** — melindungi modal terlebih dahulu, baru kemudian mencari profit. Seluruh keputusan trading diambil oleh AI yang menganalisis data market secara teknikal (RSI, EMA, ATR), memvalidasi risiko, dan mengeksekusi order secara otomatis tanpa intervensi manusia.
+Sistem ini menggunakan arsitektur **Hybrid Tactical** — menggabungkan kecepatan kalkulasi matematika murni (Z-Score, Kalman Filter) dengan kecerdasan AI untuk konfirmasi keputusan. **QuantEngine** mendeteksi peluang dalam milidetik, lalu **Gemma AI** memvalidasi sebelum eksekusi.
 
 ### 🎯 Filosofi Inti
 
 | Prinsip | Penjelasan |
 |---------|------------|
-| **Capital Preservation** | Lindungi modal kecil ($1-$2) agar sistem bisa survive long-term |
-| **Probabilistic Thinking** | AI bertindak sebagai analis probabilistik, bukan peramal harga |
+| **Hybrid Intelligence** | Matematika untuk kecepatan, AI untuk kebijaksanaan |
+| **Capital Multiplication** | Agresif mencari pertumbuhan modal melalui leverage optimal |
 | **Self-Learning** | Sistem belajar dari kesalahan trading sebelumnya |
 | **Risk Override** | Risk Manager dapat meng-override keputusan AI |
 | **No Emotion** | AI tidak terpengaruh emosi — tidak FOMO, tidak revenge trade |
+| **Battle Directive** | Gemma sebagai "Gubernur Strategi" menentukan arah makro setiap jam |
 
 ---
 
 ## 🏗️ Arsitektur Sistem
 
-Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
+Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur eksekusi:
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    SERVER (Entry Point)               │
-│      Dual-Engine Architecture + Strategy Router        │
+│        Hybrid Tactical Engine + Strategy Router       │
 ├──────────┬──────────┬──────────┬────────────────────┤
 │   API    │  CORE    │ EXCHANGE │    SERVICES         │
-│ (Fastify)│ (AI/Risk)│(AsterDex)│  (Trade Orchestr.)  │
+│ (Fastify)│(AI/Quant)│ (Bitget) │  (Trade Orchestr.)  │
 ├──────────┴──────────┴──────────┴────────────────────┤
 │                   DATABASE (MongoDB)                  │
-│            Models → Repositories → Mongoose           │
+│     Models → Repositories → Mongoose (Directive)      │
 ├─────────────────────────────────────────────────────┤
 │              MONITORING & UTILITIES                   │
 │      Prometheus │ Health Check │ Alert Manager         │
@@ -50,10 +51,12 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 
 ### Arsitektur Detail:
 
-- **Clean Architecture** — Pemisahan antara Core, Services, Database, dan Exchange
-- **Infinite Scan Loop** — Continuous trading engine untuk SCALPING (infinite loop)
-- **Scheduled Scan** — Cron-based engine untuk INTRADAY (15m) dan SWING (1h)
-- **Strategy-Driven** — Engine otomatis dipilih berdasarkan `TRADING_STRATEGY`
+- **Hybrid Tactical Architecture** — Menggabungkan 3 jalur: Strategy Governor (Cold Path), QuantEngine (Hot Path), dan Gemma AI (Confirmation Path)
+- **Battle Directive System** — Gemma mengeluarkan "perintah perang" makro setiap jam yang menentukan bias, threshold, dan agresivitas
+- **QuantEngine** — Mesin matematika murni untuk deteksi peluang dalam milidetik (Z-Score + Kalman Filter)
+- **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING)
+- **Scan Mode System** — 3 mode pemindaian: VIP (major pairs), HOT50 (top volume), ALL (seluruh market)
+- **PAPER/LIVE Trading** — Mendukung mode simulasi tanpa KYC dan mode live trading
 - **AI Feedback Loop** — Hasil trading sebelumnya diinjeksikan ke prompt AI
 - **Self-Learning Memory** — MongoDB menyimpan pelajaran dari kesalahan
 - **Risk First Trading System** — Risk Manager sebagai penjaga terakhir sebelum eksekusi
@@ -68,12 +71,13 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 | **Web Server** | Fastify 5 |
 | **AI Engine** | Ollama + Gemma 4 (gemma4:latest) |
 | **Database** | MongoDB Atlas + Mongoose 9 |
-| **Exchange** | AsterDex Futures API (V3) |
+| **Exchange** | Bitget Futures API V2 (USDT-FUTURES) |
+| **Quant** | simple-statistics + mathjs |
 | **Validation** | Zod 4 |
 | **Monitoring** | Prometheus (prom-client) |
 | **Logger** | Pino + pino-pretty |
 | **Scheduler** | node-cron |
-| **Crypto** | ethers.js (EIP-712 signing) |
+| **Crypto** | crypto (HMAC-SHA256 signing) |
 | **Math** | Decimal.js (precision) |
 | **HTTP** | Axios |
 
@@ -84,13 +88,17 @@ Sistem ini menggunakan **Clean Architecture** dengan pemisahan layer yang jelas:
 ```
 hyper-gemma-ai-trader/
 ├── src/
-│   ├── server.ts                    # Entry point utama (bootstrap + dual-engine + strategy router)
-│   ├── core/                        # Logika inti (AI, Market, Risk)
+│   ├── server.ts                    # Entry point utama (bootstrap + hybrid tactical engine)
+│   ├── core/                        # Logika inti (AI, Quant, Market, Risk)
 │   │   ├── ai/
-│   │   │   ├── decision-engine.ts   # Orkestrator keputusan trading AI
-│   │   │   ├── ollama-client.ts     # HTTP client untuk Ollama API
+│   │   │   ├── decision-engine.ts   # Orkestrator keputusan trading AI (Confirmation Path)
+│   │   │   ├── strategy-governor.ts # Gubernur Strategi Makro (Cold Path / Commander)
+│   │   │   ├── ollama-client.ts     # HTTP client untuk Ollama API (generic + validated JSON)
 │   │   │   ├── prompt-builder.ts    # Builder prompt dinamis untuk Gemma
 │   │   │   └── learning-engine.ts   # Engine pembelajaran dari kesalahan
+│   │   ├── quant/
+│   │   │   ├── quant-engine.ts      # Mesin trading matematika kecepatan tinggi (Hot Path)
+│   │   │   └── quant-utils.ts       # Utilitas: Z-Score, Kalman Filter, Velocity
 │   │   ├── market/
 │   │   │   ├── indicator-engine.ts  # Kalkulator indikator teknikal (EMA, RSI, ATR)
 │   │   │   └── market-regime.ts     # Deteksi regime market (Trending/Ranging/Volatile)
@@ -98,19 +106,21 @@ hyper-gemma-ai-trader/
 │   │       ├── risk-manager.ts      # Validasi risiko & leverage cap
 │   │       └── cooldown-manager.ts  # Sistem cooldown setelah loss
 │   ├── exchange/
-│   │   ├── asterdex.client.ts       # Client API AsterDex (V3 + EIP-712 signature)
-│   │   ├── market-data.provider.ts  # Provider data market real-time
-│   │   └── order.executor.ts        # Eksekutor order ke exchange
+│   │   ├── bitget.client.ts         # Client API Bitget V2 (HMAC-SHA256 signature)
+│   │   ├── market-data.provider.ts  # Provider data market real-time (Bitget)
+│   │   └── order.executor.ts        # Eksekutor order ke Bitget (market + plan orders)
 │   ├── database/
 │   │   ├── mongo.ts                 # Koneksi MongoDB
 │   │   ├── models/
 │   │   │   ├── trade.model.ts       # Schema trade (Mongoose)
 │   │   │   ├── memory.model.ts      # Schema memory/pelajaran
-│   │   │   └── session.model.ts     # Schema sesi trading
+│   │   │   ├── session.model.ts     # Schema sesi trading
+│   │   │   └── directive.model.ts   # Schema Battle Directive (Mongoose)
 │   │   └── repositories/
 │   │       ├── trade.repository.ts  # Repository akses data trade
 │   │       ├── memory.repository.ts # Repository akses data memory
-│   │       └── session.repository.ts # Repository akses data session
+│   │       ├── session.repository.ts # Repository akses data session
+│   │       └── directive.repository.ts # Repository akses Battle Directive
 │   ├── services/
 │   │   ├── trade.service.ts         # Orchestrator eksekusi trade
 │   │   └── session.service.ts       # Manajemen sesi trading (lifecycle)
@@ -118,101 +128,72 @@ hyper-gemma-ai-trader/
 │   │   ├── monitoring-api.ts        # Setup Fastify server
 │   │   └── routes/
 │   │       ├── health.route.ts      # Endpoint /health
-│   │       ├── metrics.route.ts     # Endpoint /metrics (Prometheus)
-│   │       └── trade.route.ts       # Endpoint /trades & /trades/stats
-│   ├── jobs/
-│   │   └── memory-consolidation.job.ts  # Job konsolidasi memori harian
+│   │       └── metrics.route.ts     # Endpoint /metrics (Prometheus)
 │   ├── monitoring/
-│   │   ├── metrics.ts               # Prometheus counters & gauges
-│   │   ├── health-check.ts          # System health check (DB, uptime, memory)
-│   │   └── alert-manager.ts         # Alert system (logging-based)
+│   │   ├── metrics.ts               # Custom Prometheus metrics
+│   │   ├── health-check.ts          # System health check
+│   │   └── alert-manager.ts         # Alert manager (multi-level)
 │   ├── types/
-│   │   ├── ai.types.ts              # Type definitions untuk AI decision
-│   │   ├── market.types.ts          # Type definitions untuk market data
-│   │   └── enum.types.ts            # Enum definitions (TradeAction, MarketRegime, dll.)
-│   ├── config/
-│   │   ├── env.ts                   # Environment variables (Zod validated)
-│   │   └── constants.ts             # Konstanta trading & market
+│   │   ├── ai.types.ts              # Types untuk AI decision & Ollama
+│   │   ├── market.types.ts          # Types untuk market data & account status
+│   │   └── enum.types.ts            # Enum untuk trading strategy, mode, action, dll
 │   ├── utils/
-│   │   ├── logger.ts                # Pino logger instance
-│   │   ├── helpers.ts               # Utility functions (currency, sleep, percentage)
-│   │   ├── retry.ts                 # Generic retry dengan backoff
-│   │   ├── json-validator.ts        # Validator JSON response AI (Zod schema)
-│   │   └── time.ts                  # Utility waktu
-│   ├── scripts/
-│   │   ├── backtest.ts              # Script backtesting dengan mock AI
-│   │   ├── simulate-live.ts         # Simulasi live trading $1
-│   │   ├── verify-all.ts            # Verifikasi final semua fitur
-│   │   ├── check-balance.ts         # Script cek saldo AsterDex
-│   │   ├── test-ollama.ts           # Test koneksi Ollama
-│   │   ├── test-real-time.ts        # Test data real-time
-│   │   └── test-v3-realtime.ts      # Test AsterDex V3 API
-│   └── tests/
-│       ├── unit/
-│       │   └── risk-manager.spec.ts # Unit test Risk Manager
-│       └── integration/             # (Placeholder untuk integration test)
-├── etc/
-│   ├── ai-promt.json                # Blueprint arsitektur & prompt AI lengkap
-│   ├── BACKTEST_RESULTS.md          # Hasil backtesting
-│   ├── SIMULATION_RESULTS.md        # Hasil simulasi live
-│   ├── FINAL_VERIFICATION.md        # Report verifikasi final
-│   └── GEMINI.md                    # Catatan konfigurasi Gemma
+│   │   ├── json-validator.ts        # Validator JSON ketat (Zod schema: AIDecision + BattleDirective)
+│   │   └── logger.ts                # Logger configuration (Pino)
+│   └── jobs/
+│       └── memory-consolidation.job.ts # Job konsolidasi memori harian
 ├── .env                             # Environment variables
-├── package.json                     # Dependencies & scripts
+├── package.json                     # Dependencies
 ├── tsconfig.json                    # TypeScript configuration
-└── LICENSE                          # MIT License
+└── README.md                        # Dokumentasi ini
 ```
 
 ---
 
-## ⚡ Daftar Fitur Lengkap
+## 🧩 Detail Fitur
 
-### 1. 🧠 AI Decision Engine (Mesin Keputusan AI)
+### 1. 🧠 Strategy Governor (Cold Path / Commander)
 
-**File:** `src/core/ai/decision-engine.ts`
+**File:** `src/core/ai/strategy-governor.ts`
 
-Orkestrator utama yang mengoordinasikan seluruh proses pengambilan keputusan trading:
+Gemma bertindak sebagai **"Gubernur Strategi"** yang mengeluarkan **Battle Directive** setiap jam. Directive ini menentukan arah makro untuk seluruh sistem:
 
-- **Fetch Market Data** — Mengambil data market real-time dari AsterDex (harga, volume, indikator)
-- **Pre-AI Risk Check** — Memvalidasi risiko **sebelum** memanggil AI untuk menghemat resource (skip jika posisi penuh atau ada safety risk)
-- **Continuous Learning** — Mengambil 5 trade terakhir dari database sebagai konteks pembelajaran
-- **Build Prompt** — Menyusun prompt dinamis yang berisi data market, status akun, dan memori
-- **Get AI Decision** — Mengirim prompt ke Ollama/Gemma dan mendapatkan keputusan terstruktur
-- **Final Risk Validation** — Memvalidasi keputusan AI melalui Risk Manager sebelum eksekusi
-- **Fallback Safety** — Jika terjadi error, mengembalikan keputusan SKIP sebagai fallback
-
-**Output AI Decision:**
-```json
-{
-  "decision": "LONG | SHORT | WAIT | SKIP",
-  "confidence_score": 0-100,
-  "market_regime": "TRENDING | RANGING | VOLATILE | UNCLEAR",
-  "risk_level": "LOW | MEDIUM | HIGH",
-  "leverage_suggestion": 1-500,
-  "position_size": "SMALL | NORMAL | REDUCED",
-  "entry_reason": "string",
-  "risk_factors": ["string"],
-  "stop_loss_logic": "string",
-  "take_profit_logic": "string",
-  "self_reflection": "string",
-  "final_summary": "string"
-}
-```
+- **Macro Market Analysis** — Menganalisis BTC dan ETH sebagai barometer pasar
+- **Battle Directive Output** — Menghasilkan JSON terstruktur berisi:
+  - `bias` — Arah pasar: `LONG`, `SHORT`, atau `NEUTRAL`
+  - `z_score_threshold` — Threshold sensitivitas untuk QuantEngine (1.0-5.0)
+  - `kalman_aggressiveness` — Agresivitas Kalman Filter (0.01-0.5)
+  - `max_leverage` — Leverage maksimal yang direkomendasikan
+  - `allowed_symbols` — Daftar simbol yang diperbolehkan
+  - `reasoning` — Alasan di balik keputusan
+- **Strategy-Adaptive Threshold** — SCALPING mendapat threshold rendah (1.0-1.8), INTRADAY mendapat threshold menengah (1.5-2.5)
+- **Persistent Directive** — Disimpan di MongoDB via `DirectiveRepository`, bertahan antar restart
+- **Graceful Fallback** — Jika gagal, menggunakan directive terakhir yang tersimpan
 
 ---
 
-### 2. 🔗 Ollama Client (Integrasi AI Lokal)
+### 2. ⚡ QuantEngine (Hot Path / Math Sensor)
 
-**File:** `src/core/ai/ollama-client.ts`
+**File:** `src/core/quant/quant-engine.ts`
 
-Client HTTP yang terhubung ke Ollama API untuk inference model Gemma secara lokal:
+Mesin trading matematika murni yang bekerja dalam **milidetik** tanpa memanggil AI:
 
-- **Model Configurasi** — Mendukung model Gemma 4 (gemma4:latest) dan varian lainnya
-- **Parameter Tuning** — Temperature 0.1 (konservatif), Top-K 40, Top-P 0.85
-- **Mock Mode** — Mode mock AI (`MOCK_AI=true`) untuk testing tanpa Ollama
-- **JSON Extraction** — Mengekstrak dan memvalidasi JSON dari respons LLM
-- **Timeout Management** — Timeout 150 detik untuk request yang berat
-- **Latency Tracking** — Mencatat latency setiap request ke AI
+- **Z-Score Detection** — Mendeteksi deviasi harga dari rata-rata (mean reversion signal)
+- **Kalman Filter** — Memfilter noise harga untuk menemukan "True Trend" tanpa lag
+- **Micro-Bounce Confirmation** — Anti-falling-knife: hanya entry jika harga sudah bouncing ke arah yang benar
+- **Directive-Driven** — Menggunakan `z_score_threshold` dan `bias` dari Battle Directive
+- **Instant Decision** — Menghasilkan `AIDecision` lengkap (confidence, leverage, regime) tanpa latency AI
+- **NEUTRAL Safety** — Jika bias NEUTRAL, menggunakan threshold ketat 2.2 untuk kedua arah
+
+**File:** `src/core/quant/quant-utils.ts`
+
+Utilitas matematika yang digunakan oleh QuantEngine:
+
+| Fungsi | Deskripsi |
+|--------|-----------|
+| `calculateZScore(prices)` | Mengukur deviasi standar harga terakhir dari mean |
+| `applyKalmanFilter(prices, noise)` | Filter noise harga tanpa lag moving average |
+| `calculateVelocity(prices)` | Linear regression untuk menghitung kecepatan perubahan harga |
 
 ---
 
@@ -226,12 +207,12 @@ Membangun prompt terstruktur dalam Bahasa Indonesia untuk model Gemma:
   - `SCALPING` → **Aggressive Scalping** — fokus Volatility Bursts, Volume Spikes, Price Anomalies, profit instan
   - `INTRADAY/SWING` → Konfirmasi trend solid, ruang nafas untuk SL, target profit lebar
 - **System Instruction** — Persona **"Hyper-Gemma Ultra"** sebagai AI Scalping Engine agresif
-- **Small Account Optimization** — Instruksi leverage 50x-200x khusus akun $1 agar memenuhi minimum order $5
+- **Small Account Optimization** — Instruksi leverage 50x-200x khusus akun kecil agar memenuhi minimum order $5
 - **Tight SL/TP Instruction** — Wajib memberikan target SL/TP dalam % pergerakan harga yang ketat
+- **Enhanced Market Context** — Menyertakan `high_24h` dan `low_24h` untuk analisis range harian
 - **Account Context** — Menyertakan equity, PnL harian, dan loss streak
-- **Market Context** — Menyertakan harga, EMA20/50, RSI, trend, ATR, dan 24h change
 - **Memory Injection** — Menyuntikkan pelajaran dari trading sebelumnya
-- **Response Schema** — Memaksa output JSON dengan format ketat
+- **Response Schema** — Memaksa output JSON dengan format ketat (12 field)
 - **Prinsip Capital Multiplication** — Eksekusi peluang dengan probabilitas profit tertinggi
 
 ---
@@ -254,17 +235,14 @@ Sistem self-learning yang menyimpan dan mengkonsolidasi pelajaran:
 
 **File:** `src/core/market/indicator-engine.ts`
 
-Kalkulator indikator teknikal menggunakan presisi tinggi (Decimal.js):
+Menghitung indikator teknikal dari data candlestick:
 
-| Indikator | Deskripsi | Parameter |
-|-----------|-----------|-----------|
-| **EMA** | Exponential Moving Average | Period 20 & 50 |
-| **RSI** | Relative Strength Index | Period 14 |
-| **ATR** | Average True Range | Period 14 |
-
-- Semua kalkulasi menggunakan `Decimal.js` untuk presisi hingga 2 desimal
-- Handling edge case saat data kurang dari period yang dibutuhkan
-- Deteksi trend: BULLISH (Price > EMA20 > EMA50), BEARISH (Price < EMA20 < EMA50), NEUTRAL
+| Indikator | Metode |
+|-----------|--------|
+| **EMA 20** | Exponential Moving Average 20 periode |
+| **EMA 50** | Exponential Moving Average 50 periode |
+| **RSI 14** | Relative Strength Index 14 periode |
+| **ATR 14** | Average True Range 14 periode (null-safe) |
 
 ---
 
@@ -295,11 +273,11 @@ Layer perlindungan modal yang dapat meng-override keputusan AI:
   - `SCALPING` → 15% jarak minimum ke harga likuidasi (lebih toleran karena leverage tinggi)
   - `INTRADAY/SWING` → 30% jarak minimum (lebih konservatif)
 - **Leverage Cap** — Membatasi leverage hingga maksimal 500x
+- **Silent Pre-Scan** — Log validasi disuprekan untuk `PRE_SCAN_CHECK` (mengurangi noise log)
 - **Position Sizing** — Kalkulasi ukuran posisi berdasarkan tingkat risiko:
   - `NORMAL` → 100% dari safe margin
   - `REDUCED` → 50% dari safe margin
   - `SMALL` → 25% dari safe margin
-- **Active Position Monitor** — Menampilkan detail posisi aktif (PnL, entry price, margin, ROE, liquidation price)
 - **Trading Blocked** — Memblokir trade baru jika posisi penuh, ada safety risk, atau duplicate coin
 
 ---
@@ -317,33 +295,34 @@ Mengelola periode cooldown setelah kerugian beruntun:
 
 ---
 
-### 9. 🔌 AsterDex Client (Koneksi Exchange)
+### 9. 🔌 Bitget Client (Koneksi Exchange)
 
-**File:** `src/exchange/asterdex.client.ts`
+**File:** `src/exchange/bitget.client.ts`
 
-Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
+Client lengkap untuk Bitget Futures API V2 dengan autentikasi HMAC-SHA256:
 
 | Fitur | Deskripsi |
 |-------|-----------|
-| **EIP-712 Signing** | Tanda tangan kriptografis menggunakan `ethers.js` Wallet |
+| **HMAC-SHA256 Signing** | Tanda tangan kriptografis menggunakan `crypto.createHmac` |
 | **Get Candles** | Mengambil data candlestick (klines) untuk analisis |
-| **Get Ticker 24h** | Mengambil statistik harga 24 jam per simbol |
-| **Get All Tickers** | Mengambil semua 24h ticker sekaligus (untuk hot pair filtering) |
-| **Get Exchange Info** | Mengambil informasi exchange (symbols, precision, status) |
-| **Get All Symbols** | Mengambil semua pasangan trading yang aktif |
-| **Get Symbol Info** | Mengambil `quantityPrecision` dan `pricePrecision` per simbol (baru) |
-| **Get Account Balance** | Mengambil saldo akun (USDC/USDT) |
-| **Get Account Info** | Mengambil informasi akun lengkap (future-proof V3) |
+| **Get Price History** | Shortcut: mengambil array harga close untuk QuantEngine |
+| **Get All Tickers** | Mengambil semua 24h ticker sekaligus (normalized format) |
+| **Get Account Balance** | Mengambil saldo akun (USDT-FUTURES) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
-| **Place Order** | Membuat order MARKET, LIMIT, STOP_MARKET, atau TAKE_PROFIT_MARKET (dengan stopPrice & reduceOnly) |
-| **Set Leverage** | Mengatur leverage per simbol (smart error handling: ignore -4028, throw -2027) |
-| **Set Margin Type** | Mengatur tipe margin (CROSSED/ISOLATED) |
-| **Get Symbol Precision** | Shortcut ke `getSymbolInfo().quantityPrecision` |
+| **Get Symbol Info** | Mengambil `quantityPrecision`, `pricePrecision`, dan `maxLeverage` per simbol |
+| **Place Order** | Membuat market atau limit order |
+| **Place Plan Order** | Membuat trigger-based order untuk SL/TP (plan orders) |
+| **Set Leverage** | Mengatur leverage per simbol (PAPER mode: simulated) |
 
 **Autentikasi:**
-- Menggunakan **EIP-712 Typed Data** signing
-- Domain: `AsterSignTransaction`, Chain ID: `1666`
-- Nonce berbasis microsecond timestamp
+- Menggunakan **HMAC-SHA256** signing (`timestamp + method + path + body`)
+- Headers: `ACCESS-KEY`, `ACCESS-SIGN`, `ACCESS-TIMESTAMP`, `ACCESS-PASSPHRASE`
+- Product Type: `USDT-FUTURES`
+
+**PAPER Mode:**
+- `placeOrder()` → Return mock orderId tanpa mengirim ke exchange
+- `placePlanOrder()` → Return mock orderId untuk SL/TP
+- `setLeverage()` → Simulated tanpa API call (KYC Bypass)
 
 ---
 
@@ -351,17 +330,16 @@ Client lengkap untuk AsterDex Futures API V3 dengan autentikasi Web3:
 
 **File:** `src/exchange/market-data.provider.ts`
 
-Aggregator data market yang menggabungkan raw data dari exchange dengan indikator teknikal:
+Aggregator data market yang menggabungkan raw data dari Bitget dengan indikator teknikal:
 
 - **Strategy-Adaptive Interval** — Menggunakan timeframe `5m` untuk SCALPING dan `1h` untuk INTRADAY/SWING
-- **Real-time Market Data** — Mengambil klines dan ticker dari AsterDex
+- **Real-time Market Data** — Mengambil klines dan ticker dari Bitget V2
 - **Indicator Calculation** — Menghitung EMA20, EMA50, RSI, ATR dari data candlestick
 - **Trend Detection** — Menentukan trend (BULLISH/BEARISH/NEUTRAL) dari EMA crossover
-- **Aggregated Account Metrics** — Menghitung equity, available balance, margin ratio, maintenance margin, margin balance, dan total wallet balance dari raw API data
-- **Active Position Filtering** — Filter posisi dengan `positionAmt ≠ 0` dari semua posisi
-- **Unrealized PnL Aggregation** — Menghitung total unrealized PnL dari seluruh posisi aktif
-- **Safety Block Pattern** — Jika API gagal, mengembalikan dummy position `SAFETY_BLOCK` untuk mencegah trade yang tidak diinginkan
-- **Fallback to Mock** — Jika API market data gagal, menggunakan data mock sebagai fallback
+- **24h High/Low Data** — Mengambil `high_24h` dan `low_24h` dari raw Bitget ticker
+- **Aggregated Account Metrics** — Menghitung equity, available balance, margin ratio, maintenance margin, margin balance, dan total wallet balance
+- **Active Position Filtering** — Filter posisi dengan `total ≠ 0` dan normalisasi field names
+- **Virtual Balance Fallback** — Dalam PAPER mode dengan $0 balance, menyediakan virtual $1.00 untuk simulasi
 
 ---
 
@@ -369,26 +347,22 @@ Aggregator data market yang menggabungkan raw data dari exchange dengan indikato
 
 **File:** `src/exchange/order.executor.ts`
 
-Mengeksekusi order ke exchange AsterDex dengan proteksi otomatis dan optimisasi leverage:
+Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 
 - **Min Notional** — Memastikan nilai order minimal $5.1 (memenuhi minimum exchange $5)
 - **Dynamic Quantity** — Menghitung kuantitas berdasarkan harga terkini dan presisi simbol
-- **Dual Precision** — Menggunakan `quantityPrecision` untuk kuantitas dan `pricePrecision` untuk harga SL/TP
-- **Auto-Leverage Optimization** — Sistem otomatis menaikkan leverage jika saran AI terlalu rendah untuk memenuhi margin minimum:
-  - Menghitung leverage minimum yang dibutuhkan: `ceil(minNotional / (available * 0.9))`
-  - Auto-increase jika leverage AI < minimum yang dibutuhkan
-- **Asset-Class Leverage Cap** — Membatasi leverage berdasarkan jenis aset:
-  - BTC/ETH (major) → max 200x
-  - Altcoins → max 50x
-- **20% Margin Buffer** — Menambahkan 20% buffer pada kalkulasi margin untuk fees, slippage, dan minimum wallet
-- **Auto Margin** — Memaksa CROSSED margin type
+- **Exchange-Aware Leverage** — Mengambil `maxLeverage` langsung dari kontrak Bitget per simbol
+- **Auto-Leverage Optimization** — Menaikkan leverage otomatis jika saran AI terlalu rendah:
+  - `ceil(minNotional / (available * 0.9))` — 10% buffer
+  - Capped by `maxExchangeLeverage` per simbol
+- **2% Safety Buffer** — Final affordability check dengan 2% buffer untuk fees
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
 - **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
-- **Strategy-Dynamic Stop Loss & Take Profit** — Setelah order utama tereksekusi, otomatis memasang SL/TP berdasarkan strategi:
-  - `SCALPING` → SL 0.5%, TP 0.75% (RR 1:1.5)
-  - `INTRADAY` → SL 1%, TP 1.5% (RR 1:1.5)
+- **Strategy-Dynamic SL/TP via Plan Orders** — Setelah order utama tereksekusi, otomatis memasang SL/TP menggunakan Bitget Plan Orders:
+  - `SCALPING/INTRADAY` → SL 1.5%, TP 2.5% (RR ~1:1.67)
   - `SWING` → SL 3%, TP 10% (RR 1:3.3)
-  - Graceful fallback jika SL/TP gagal (warning log, posisi tetap terbuka)
+  - Trigger type: `mark_price`
+  - Graceful fallback jika SL/TP gagal
 
 ---
 
@@ -409,57 +383,45 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 
 ### 13. 🗄️ Database Layer (Lapisan Database)
 
-#### MongoDB Connection
-**File:** `src/database/mongo.ts`
-- Koneksi ke MongoDB Atlas dengan reconnect handling
-- Event listener untuk disconnect dan error
-
-#### Models (Skema Data)
+#### Models
 
 | Model | File | Deskripsi |
 |-------|------|-----------|
-| **Trade** | `src/database/models/trade.model.ts` | Menyimpan setiap trade: session_id (ref Session), pair, action, entry/exit price, exit_reason, mistake_analysis, leverage, confidence, regime, risk, PnL, AI reasoning |
-| **Memory** | `src/database/models/memory.model.ts` | Menyimpan pelajaran: kategori, kesalahan, pelajaran, kondisi market, frekuensi |
-| **Session** | `src/database/models/session.model.ts` | Menyimpan sesi: PnL harian, equity puncak, drawdown, streak, mode |
+| **Trade** | `trade.model.ts` | Setiap trade yang dieksekusi (pair, action, PnL, ai_reasoning) |
+| **Memory** | `memory.model.ts` | Pelajaran dari kesalahan (kategori, severity, occurrence) |
+| **Session** | `session.model.ts` | Sesi trading (mode, start/end time, total trades) |
+| **BattleDirective** | `directive.model.ts` | **[NEW]** Perintah strategi makro dari Gemma (bias, threshold, leverage) |
 
-**Index yang Dioptimasi:**
-- Trade: `created_at DESC`, `result + confidence_score`, `market_regime + result`
-- Memory: `category + effectiveness_score`, `last_triggered_at DESC`
-- Session: `started_at DESC`, `current_mode + cooldown_until`
+#### BattleDirective Schema
 
-#### Repositories (Akses Data)
+```typescript
+{
+  bias: 'LONG' | 'SHORT' | 'NEUTRAL',
+  z_score_threshold: number,        // Sensitivitas QuantEngine
+  kalman_aggressiveness: number,     // Agresivitas filter noise
+  max_leverage: number,              // Leverage maks yang direkomendasikan
+  allowed_symbols: string[],         // Simbol yang diperbolehkan
+  last_updated: Date                 // Timestamp directive terakhir
+}
+```
 
-| Repository | Fitur |
-|------------|-------|
-| **TradeRepository** | `create()`, `findRecent(limit)`, `getStats()` (aggregation pipeline) |
-| **MemoryRepository** | `saveLesson()` (upsert), `findTopMistakes(limit)` |
-| **SessionRepository** | `create()`, `findLatest()`, `update(id, data)` |
-
----
-
-### 14. 🌐 Monitoring API (API Pemantauan)
-
-**File:** `src/api/monitoring-api.ts`
-
-Server Fastify 5 yang menyediakan endpoint monitoring:
-
-| Endpoint | Method | Deskripsi |
-|----------|--------|-----------|
-| `/health` | GET | Status kesehatan sistem (uptime, memory, DB status) |
-| `/metrics` | GET | Prometheus metrics (format text/plain) |
-| `/trades` | GET | 20 trade terbaru dari database |
-| `/trades/stats` | GET | Statistik trading (aggregation per hasil) |
+#### Repositories
+- `trade.repository.ts` — CRUD untuk trade records
+- `memory.repository.ts` — Upsert pelajaran trading
+- `session.repository.ts` — Lifecycle management sesi
+- `directive.repository.ts` — **[NEW]** `getLatest()` dan `update()` untuk Battle Directive (upsert single document)
 
 ---
 
-### 15. 📊 Monitoring & Alerting
+### 14. 🔧 Monitoring & API
 
 #### Prometheus Metrics
 **File:** `src/monitoring/metrics.ts`
 
 | Metric | Tipe | Deskripsi |
 |--------|------|-----------|
-| `trader_trades_total` | Counter | Total trade yang dieksekusi (per pair, action, result) |
+| `trader_trades_total` | Counter | Total trades yang dieksekusi |
+| `trader_decisions_total` | Counter | Total keputusan AI (per label) |
 | `trader_pnl_total` | Gauge | Total Profit and Loss |
 | Default Metrics | Auto | CPU, memory, event loop, dll. |
 
@@ -479,106 +441,106 @@ Server Fastify 5 yang menyediakan endpoint monitoring:
 
 ---
 
-### 16. ♾️ Dual-Engine Trading Architecture & Background Jobs
+### 15. ♾️ Hybrid Tactical Engine & Background Jobs
 
-**Arsitektur dual-engine:** Engine otomatis dipilih berdasarkan `TRADING_STRATEGY` yang dikonfigurasi.
+**Arsitektur hybrid:** Menggabungkan 3 jalur eksekusi secara paralel.
 
-| Komponen | Tipe | Strategi | Deskripsi |
-|----------|------|----------|-----------|
-| **Infinite Loop** | `while(true)` | SCALPING | Scan market non-stop dengan hot pair filtering |
-| **Scheduled Scan** | Cron `*/15 * * * *` | INTRADAY | Scan setiap 15 menit + initial scan on startup |
-| **Scheduled Scan** | Cron `0 * * * *` | SWING | Scan setiap 1 jam + initial scan on startup |
-| **Memory Consolidation** | Cron `0 0 * * *` | Semua | Mengkonsolidasi memori dan pelajaran harian |
+| Komponen | Tipe | Jadwal | Deskripsi |
+|----------|------|--------|-----------|
+| **Strategy Governor** | Cron `0 * * * *` | Setiap 1 jam | Gemma mengeluarkan Battle Directive baru |
+| **Hybrid Tactical Loop** | `while(true)` | Terus-menerus | QuantEngine scan → Gemma confirm → Execute |
+| **Memory Consolidation** | Cron `0 0 * * *` | Setiap tengah malam | Konsolidasi pelajaran harian |
 
-**Reusable `runMarketScan(mode)`** — Fungsi scan terpisah yang dapat dipanggil dari infinite loop maupun cron:
+**Hybrid Tactical Loop:**
 ```
-runMarketScan(mode) {
-  1. Cek Account & Risk Status
-  2. Jika Blocked → Portfolio Snapshot → return false
-  3. Fetch All Tickers → Filter Hot Pairs:
-     - SCALPING: |priceChange| > 2% ATAU volume > $1M, sorted by volume
-     - INTRADAY/SWING: Semua pair, sorted by volume
-  4. Loop setiap pair:
-     - Evaluate via AI Decision Engine
-     - Jika peluang → Execute
-       - Sukses? → return true (stop scanning)
-       - Gagal? → Lanjut ke pair berikutnya
-     - Micro-delay 100ms antar pair
-  5. return true (scan selesai)
+runHybridTradingLoop(mode) {
+  1. Strategy Governor: Refresh Battle Directive (initial)
+
+  while (true) {
+    2. Cek Account & Risk Status
+       - Jika Safety Block → Portfolio Snapshot → Wait 10s → Retry
+    3. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
+       - VIP: 17 major pairs (BTC, ETH, BNB, XRP, SUI, TON, dll)
+       - HOT50: Top 50 by volume
+       - ALL: Seluruh market
+    4. Loop setiap hot pair:
+       a. 📊 MATH SENSOR (Instant):
+          - Ambil price history → Hitung Z-Score
+          - Real-time pulse log: [QUANT PULSE] BTCUSDT | Z: -1.85 (Target: -1.50)
+          - Jika Z-Score melampaui threshold → Hit!
+       b. 🤖 AI SNIPER (Gemma confirms):
+          - Kirim ke Decision Engine → Gemma validasi
+          - Jika LONG/SHORT → TACTICAL STRIKE → Execute
+          - Jika SKIP/WAIT → TACTICAL VETO → Skip
+       c. ⏱️ Micro-delay 50ms antar pair
+    5. Wait 1s → Ulang dari step 2
+    * On crash → Wait 5s → Retry
+  }
 }
 ```
 
+**Scan Mode System:**
+
+| Mode | Pairs | Deskripsi |
+|------|-------|-----------|
+| `VIP` | 17 pairs | Major crypto: BTC, ETH, ASTER, BNB, XRP, ZEC, XLM, SUI, TON, BCH, LINK, ADA, AVAX, LTC, TRX, ETC, HYPE |
+| `HOT50` | Top 50 | Diurutkan berdasarkan 24h volume tertinggi |
+| `ALL` | Semua | Seluruh pasangan di Bitget USDT-FUTURES |
+
 **Engine Features:**
-- **Hot Pair Filtering (SCALPING)** — Hanya scan koin dengan volatilitas tinggi (>2% change) atau volume besar (>$1M)
-- **Volume-Sorted Scanning** — Semua strategi memproses pair dari volume tertinggi ke terendah
-- **Smart Execution Continue** — Jika eksekusi gagal (misal margin kurang), lanjut scan pair berikutnya
-- **Smart Blocking** — Saat posisi penuh atau ada safety risk, return false (bukan spam API)
-- **Conditional Break** — Hanya break dari loop scan jika trade benar-benar berhasil dieksekusi
-- **API-Friendly** — Micro-delay 100ms antar pair evaluation untuk menghindari rate limit
-- **Reusable Portfolio Snapshot** — Fungsi `displayPortfolioSnapshot(status?)` yang menerima optional parameter:
-  - 📊 **Account Summary** — Equity, available balance, margin balance
-  - 💰 **Position Details** — Side, size, entry/mark/liq price, margin, PnL, ROE per posisi
-  - Graceful handling jika tidak ada posisi aktif
+- **Real-time Pulse Log** — Visual tracking Z-Score setiap pair di terminal (`\r` overwrite)
+- **Math-First, AI-Second** — QuantEngine (milidetik) → Gemma AI (detik) hanya jika math signal aktif
+- **Smart Safety Block** — Khusus block hanya untuk `Blocked: Safety` (bukan max positions), wait 10s
+- **Tactical Strike/Veto** — Logging eksplisit untuk setiap keputusan (konfirmasi atau tolak)
+- **API-Friendly** — Micro-delay 50ms antar pair evaluation
 
 ---
 
-### 17. ✅ Validasi & Safety
+### 16. ✅ Validasi & Safety
 
-#### Environment Validation
-**File:** `src/config/env.ts`
-- Validasi semua environment variable menggunakan Zod
-- Fail-fast jika konfigurasi tidak valid
-
-#### JSON Validator
 **File:** `src/utils/json-validator.ts`
-- Validasi respons AI terhadap schema Zod yang ketat
-- Ekstraksi JSON dari respons LLM yang mungkin mengandung teks tambahan
-- Error messages yang informatif per field
+
+Validasi JSON ketat menggunakan Zod schema untuk dua jenis output AI:
+
+#### AIDecision Schema
+- `decision` → Preprocess ke uppercase, fallback ke `SKIP`
+- `confidence_score` → 0-100
+- `market_regime` → Preprocess ke uppercase, fallback ke `UNCLEAR`
+- `risk_level` → Preprocess ke uppercase, fallback ke `MEDIUM`
+- `leverage_suggestion` → 1-500
+- `position_size` → Preprocess ke uppercase, fallback ke `NORMAL`
+- 6 field string tambahan (entry_reason, risk_factors, stop_loss_logic, dll)
+
+#### BattleDirective Schema (NEW)
+- `bias` → `LONG` | `SHORT` | `NEUTRAL`
+- `z_score_threshold` → 1-5
+- `kalman_aggressiveness` → 0.001-1.0
+- `max_leverage` → 1-500
+- `allowed_symbols` → Array string
+- `reasoning` → String
+
+#### JSON Extraction
+- `extractJsonFromResponse()` — Mengekstrak JSON dari response AI yang mungkin mengandung teks tambahan
+- Mencari `{` pertama dan `}` terakhir dari response string
 
 ---
 
-### 18. 🧰 Utilities (Fungsi Utilitas)
+### 17. 🤖 Ollama Client (Koneksi AI)
 
-| Utility | File | Fitur |
-|---------|------|-------|
-| **Logger** | `src/utils/logger.ts` | Pino logger dengan format pretty |
-| **Retry** | `src/utils/retry.ts` | Generic retry function dengan configurable attempts & delay |
-| **Helpers** | `src/utils/helpers.ts` | `formatCurrency()`, `sleep()`, `calculatePercentageChange()` |
-| **Time** | `src/utils/time.ts` | `getTimestamp()`, `isSameDay()`, `minutesToMs()` |
+**File:** `src/core/ai/ollama-client.ts`
 
----
+Client untuk Ollama API yang mendukung dua mode generasi:
 
-### 19. 🧪 Scripts & Testing
-
-| Script | File | Deskripsi |
-|--------|------|-----------|
-| **Backtest** | `src/scripts/backtest.ts` | Backtesting dengan 5 iterasi pada pair berbeda (BTC, SOL, LINK, DOGE, AVAX) |
-| **Simulate Live** | `src/scripts/simulate-live.ts` | Simulasi high-fidelity trading $1 dengan kalkulasi PnL |
-| **Verify All** | `src/scripts/verify-all.ts` | Verifikasi komprehensif semua fitur (Indicator, Risk, Cooldown, Trade, Alert) |
-| **Check Balance** | `src/scripts/check-balance.ts` | Mengecek saldo akun AsterDex |
-| **Test Ollama** | `src/scripts/test-ollama.ts` | Test koneksi dan respons Ollama |
-| **Test Real-time** | `src/scripts/test-real-time.ts` | Test data market real-time |
-| **Test V3 Realtime** | `src/scripts/test-v3-realtime.ts` | Test AsterDex V3 API endpoints |
-
-**Unit Tests:**
-- `src/tests/unit/risk-manager.spec.ts` — Test Risk Manager menggunakan Vitest
+- **`generateDecision(prompt)`** — Khusus untuk trading decisions dengan validasi `AIDecision` schema
+- **`generateValidatedJson<T>(prompt, validator)`** — **[NEW]** Generic method untuk validated JSON generation (digunakan oleh Strategy Governor)
+- **`generateRawJson(prompt)`** — Internal helper untuk raw JSON tanpa validasi spesifik
+- **Mock AI Mode** — Jika `MOCK_AI=true`, return mock decision tanpa memanggil Ollama
+- **Timeout 5 Menit** — Timeout diperbesar untuk model besar seperti Gemma 4
+- **Clean Error Logging** — Hanya log error message, bukan seluruh axios error object
 
 ---
 
-### 20. 🔄 Session Service (Manajemen Sesi)
-
-**File:** `src/services/session.service.ts`
-
-Mengelola lifecycle sesi trading:
-
-- **Start New Session** — Membuat sesi baru di database saat bootstrap (dengan mode NORMAL/SAFE_MODE/COOLDOWN)
-- **Get Current Session ID** — Menyediakan session ID untuk dihubungkan ke setiap trade
-- **Update Stats** — Memperbarui statistik sesi (total trades, PnL harian)
-- **Fail-Safe** — Throw error jika belum ada session aktif saat trade dieksekusi
-
----
-
-### 21. 📋 Type System (Sistem Tipe)
+### 18. 📋 Type System (Sistem Tipe)
 
 #### Enum Types (`src/types/enum.types.ts`)
 
@@ -594,13 +556,8 @@ Mengelola lifecycle sesi trading:
 | `PositionSize` | `SMALL`, `NORMAL`, `REDUCED` |
 | `TradeResult` | `WIN`, `LOSS`, `BREAKEVEN` |
 
-#### AI Types (`src/types/ai.types.ts`)
-- `AIDecision` — Struktur keputusan trading AI (12 field)
-- `OllamaRequest` — Format request ke Ollama API
-- `OllamaResponse` — Format respons dari Ollama (termasuk metrics)
-
 #### Market Types (`src/types/market.types.ts`)
-- `MarketData` — Data market lengkap (harga, indikator, trend, price_change_24h)
+- `MarketData` — Data market lengkap (harga, indikator, trend, `high_24h`, `low_24h`, `price_change_24h`)
 - `AccountStatus` — Status akun lengkap:
   - Core: `current_equity`, `open_positions`, `daily_pnl`, `loss_streak`
   - Extended: `available_balance`, `margin_ratio`, `maintenance_margin`, `margin_balance`, `total_wallet_balance`
@@ -612,37 +569,35 @@ Mengelola lifecycle sesi trading:
 ```
  0. 🚀 Bootstrap: Connect DB → Start API → Init Session
          │
- 1. 🎯 Strategy Router:
-         ├─ SCALPING → startInfiniteLoop() [while(true)]
-         ├─ INTRADAY → startScheduledTasks() [cron */15 * * * *]
-         └─ SWING    → startScheduledTasks() [cron 0 * * * *]
+ 1. 📜 Strategy Governor: Initial Battle Directive
          │
- ┌───────┤ runMarketScan(mode)
+ ┌───────┤ PARALLEL EXECUTION
  │       │
- │  2. 🛡️ Account & Risk Check
- │       │     └─ Jika blocked → Portfolio Snapshot → return false
+ │  PATH 1: 🧠 COLD PATH (Every 1 hour)
+ │       │     └─ Strategy Governor → Gemma Macro Analysis → Save Directive to DB
  │       │
- │  3. 📡 Fetch All Tickers → Filter Hot Pairs (strategy-based)
- │       │     SCALPING: |change| > 2% OR volume > $1M
- │       │     INTRADAY/SWING: Semua, sorted by volume
+ │  PATH 2: ⚡ HOT PATH (Continuous Loop)
+ │       │     ┌─ Account & Risk Check
+ │       │     │     └─ Safety Block? → Wait 10s → Retry
+ │       │     │
+ │       │     ├─ Fetch All Tickers → Filter by SCAN_MODE (VIP/HOT50/ALL)
+ │       │     │
+ │       │     ├─ Loop hot pairs:
+ │       │     │     ├─ 📊 MATH SENSOR: Z-Score + Kalman vs Directive threshold
+ │       │     │     ├─ [QUANT PULSE] Real-time terminal visualization
+ │       │     │     │
+ │       │     │     ├─ If MATH HIT:
+ │       │     │     │     ├─ 🤖 AI SNIPER: Gemma confirms/vetoes
+ │       │     │     │     ├─ ⚡ TACTICAL STRIKE → Auto-Leverage → Execute → SL/TP
+ │       │     │     │     └─ ❌ TACTICAL VETO → Skip → Next pair
+ │       │     │     │
+ │       │     │     └─ ⏱️ Micro-delay 50ms
+ │       │     │
+ │       │     └─ Wait 1s → Next cycle
  │       │
- │  4. 🔁 Loop hot pairs:
- │       │     ├─ 📊 Fetch market data (price, EMA, RSI, ATR)
- │       │     ├─ 🛡️ Pre-AI Risk Check (posisi penuh / duplicate coin)
- │       │     ├─ 📚 Load memory (5 trade terakhir)
- │       │     ├─ 📝 Build strategy-adaptive prompt (Ultra Scalping/Standard)
- │       │     ├─ 🤖 Kirim ke Ollama/Gemma4 → terima JSON
- │       │     ├─ ✅ Validasi JSON terhadap Zod schema
- │       │     ├─ 🛡️ Final Risk Validation (leverage cap)
- │       │     ├─ 💹 Auto-Leverage Optimization → Asset-Class Cap
- │       │     ├─ 💹 Eksekusi order → Auto SL/TP → Simpan ke DB
- │       │     ├─ ✅ Sukses? → return true (stop scanning)
- │       │     ├─ ❌ Gagal? → Lanjut ke pair berikutnya
- │       │     └─ ⏱️ Micro-delay 100ms (API friendly)
+ │  PATH 3: 📅 Memory Consolidation (Daily at 00:00)
  │       │
  └───────┘
-
- 📅 Background: Memory Consolidation (Daily at 00:00)
 ```
 
 ---
@@ -654,6 +609,7 @@ Mengelola lifecycle sesi trading:
 - **MongoDB** (Atlas atau lokal)
 - **Ollama** terinstal dan running (`ollama serve`)
 - **Model Gemma 4** terinstal di Ollama (`ollama pull gemma4:latest`)
+- **Bitget Account** dengan API Key, Secret Key, dan Passphrase
 
 ### Setup
 
@@ -661,47 +617,38 @@ Mengelola lifecycle sesi trading:
 # 1. Install dependencies
 npm install
 
-# 2. Konfigurasi environment
+# 2. Setup environment variables
 cp .env.example .env
-# Edit .env sesuai konfigurasi Anda
+# Edit .env dengan konfigurasi yang sesuai
 
-# 3. Jalankan development mode
-npm run dev
-
-# 4. Jalankan production mode
+# 3. Build
 npm run build
+
+# 4. Jalankan
 npm start
+
+# Atau untuk development:
+npm run dev
 ```
 
-### Scripts Tersedia
-
-```bash
-npm run dev          # Development mode (hot-reload dengan tsx)
-npm run build        # Build TypeScript ke JavaScript
-npm start            # Jalankan production build
-npm test             # Jalankan unit tests (Vitest)
-npm run backtest     # Jalankan backtesting
-```
-
----
-
-## 🔧 Konfigurasi Environment
+### Environment Variables
 
 | Variable | Deskripsi | Default |
 |----------|-----------|---------|
-| `NODE_ENV` | Environment mode | `development` |
-| `LOG_LEVEL` | Level logging Pino | `info` |
-| `MONGODB_URI` | URI koneksi MongoDB Atlas | — |
+| `NODE_ENV` | Environment | `development` |
+| `LOG_LEVEL` | Level logging | `info` |
+| `MONGODB_URI` | URI koneksi MongoDB | — |
 | `OLLAMA_BASE_URL` | URL server Ollama | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Model AI yang digunakan | `gemma4:latest` |
-| `MOCK_AI` | Gunakan mock AI (tanpa Ollama) | `false` |
-| `ASTERDEX_USER_ADDRESS` | Wallet address pengguna | — |
-| `ASTERDEX_API_KEY` | API key (signer address) | — |
-| `ASTERDEX_SECRET` | Private key untuk signing | — |
-| `ASTERDEX_BASE_URL` | Base URL AsterDex API | `https://fapi.asterdex.com` |
+| `OLLAMA_MODEL` | Model Ollama yang digunakan | `gemma:7b-instruct` |
+| `MOCK_AI` | Aktifkan mock AI (tanpa Ollama) | `false` |
+| `BITGET_API_KEY` | API Key Bitget | — |
+| `BITGET_SECRET_KEY` | Secret Key Bitget | — |
+| `BITGET_PASSPHRASE` | Passphrase Bitget | — |
+| `BITGET_BASE_URL` | Base URL Bitget API | `https://api.bitget.com` |
 | `TRADING_MODE` | Mode trading | `PAPER` |
 | `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `2` |
 | `TRADING_STRATEGY` | Strategi trading AI | `SCALPING` |
+| `SCAN_MODE` | Mode pemindaian market | `VIP` |
 | `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
 
 ---
@@ -709,36 +656,34 @@ npm run backtest     # Jalankan backtesting
 ## 🔮 Roadmap & Scalability
 
 ### ✅ Sudah Diimplementasi
+- [x] **Hybrid Tactical Architecture** (QuantEngine + Gemma AI Confirmation)
+- [x] **Strategy Governor / Battle Directive System** (Gemma sebagai Commander setiap jam)
+- [x] **QuantEngine** (Z-Score + Kalman Filter + Micro-Bounce detection)
+- [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, plan orders)
+- [x] **PAPER / LIVE Trading Mode** (simulasi tanpa KYC, virtual $1 balance)
+- [x] **Scan Mode System** (VIP / HOT50 / ALL)
+- [x] **Real-time Quant Pulse Log** (terminal Z-Score visualization)
 - [x] AI Decision Engine dengan Gemma 4
-- [x] **Dual-Engine Architecture** (Infinite Loop SCALPING / Cron INTRADAY 15m / Cron SWING 1h)
-- [x] **Hot Pair Filtering** (volatilitas >2% atau volume >$1M untuk SCALPING)
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
-- [x] **Smart Execution Continue** (lanjut scan jika eksekusi gagal)
-- [x] **Auto-Leverage Optimization** (auto-increase leverage untuk memenuhi margin minimum)
-- [x] **Asset-Class Leverage Cap** (BTC/ETH max 200x, altcoins max 50x)
-- [x] **Strategy-Dynamic SL/TP** (SCALPING 0.5%/0.75%, INTRADAY 1%/1.5%, SWING 3%/10%)
+- [x] **Auto-Leverage Optimization** (auto-increase + exchange-aware cap)
+- [x] **Strategy-Dynamic SL/TP** (Bitget Plan Orders, mark_price trigger)
 - [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
 - [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
-- [x] **Smart Blocking & Crash Recovery** (30s wait / 10s retry)
-- [x] Integrasi AsterDex V3 API (EIP-712)
+- [x] **Validated JSON for Both AI Schemas** (AIDecision + BattleDirective via Zod)
 - [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
-- [x] Risk Management & Leverage Cap
+- [x] Risk Management & Leverage Cap (500x)
 - [x] Dynamic Max Positions (configurable via `MAX_POSITIONS`)
 - [x] Pre-AI Risk Validation (skip AI jika posisi penuh)
 - [x] Session Management (lifecycle tracking)
 - [x] Reusable Portfolio Snapshot (equity, margin, ROE, liq price)
-- [x] Aggregated Account Metrics (margin ratio, maintenance margin, wallet balance)
 - [x] Safety Block Pattern (mencegah trade saat API gagal)
-- [x] Accurate Entry Price Tracking dari execution
 - [x] Trade History dengan exit_reason & mistake_analysis
 - [x] Self-Learning Memory System
-- [x] Full Market Scanning (semua pair)
 - [x] Monitoring API (Prometheus + Fastify)
 - [x] Backtesting & Simulation
 - [x] Comprehensive Type Safety (Zod + TypeScript)
-- [x] **Pre-Check Margin Validation** (20% buffer untuk fees & slippage)
-- [x] **Strategy-Adaptive Timeframe** (5m SCALPING, 1h INTRADAY/SWING)
-- [x] **Dual Precision** (quantityPrecision + pricePrecision dari exchange)
+- [x] **Enhanced Market Data** (high_24h, low_24h untuk analisis range)
+- [x] **Clean Error Logging** (axios error message only, bukan full object)
 
 ### 🔜 Rencana Pengembangan
 - [ ] Multi-agent trading
