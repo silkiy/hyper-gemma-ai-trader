@@ -3,6 +3,7 @@ import { TradeAction, MarketRegime, RiskLevel, PositionSize } from '../types/enu
 import type { AIDecision } from '../types/ai.types.js';
 
 export const AIDecisionSchema = z.object({
+  symbol: z.string().optional(),
   decision: z.preprocess((val: any) => {
     const s = String(val).toUpperCase();
     if (['LONG', 'SHORT', 'WAIT', 'SKIP'].includes(s)) return s;
