@@ -1,6 +1,7 @@
 import { TradeAction, MarketRegime, RiskLevel, PositionSize } from './enum.types.js';
 
 export type AIDecision = {
+  symbol?: string;
   decision: TradeAction;
   confidence_score: number;
   market_regime: MarketRegime;
