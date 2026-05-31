@@ -115,18 +115,20 @@ async function runHybridTradingLoop(mode: SessionMode) {
 
       for (const pair of hotPairs) {
         try {
-          const prices = await bitgetClient.getPriceHistory(pair, interval, 20);
+          // Get full OHLCV history for Trinity analysis (100 candles)
+          const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, 100);
           
-          // 1. MATH SENSOR (Instant)
-          const { decision: quantDecision, zScore, threshold } = await quantEngine.evaluateHighSpeed(pair, prices);
+          // 1. MATH SENSOR (Trinity: Z + Hurst + VWAP)
+          const { decision: quantDecision, zScore, threshold, hurst } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
           
-          // Real-time Pulse Log (Now shows threshold for transparency)
+          // Real-time Pulse Log (Trinity View)
           const thresholdSymbol = zScore < 0 ? `-${threshold.toFixed(2)}` : `+${threshold.toFixed(2)}`;
-          process.stdout.write(`\r[QUANT PULSE] ${pair} | Z: ${zScore.toFixed(2)} (Target: ${thresholdSymbol})      `);
+          const regime = hurst > (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRND' : 'RNG';
+          process.stdout.write(`\r[PULSE] ${pair} | Z: ${zScore.toFixed(2)} (${thresholdSymbol}) | H: ${hurst.toFixed(2)} [${regime}]      `);
 
           if (quantDecision) {
-            console.log(''); // Move to new line
-            logger.info({ pair, zScore: zScore.toFixed(2), threshold: threshold.toFixed(2) }, '🎯 MATH SENSOR HIT: Target reached!');
+            console.log(''); // Clear pulse line
+            logger.info({ pair, zScore: zScore.toFixed(2), hurst: hurst.toFixed(2), regime }, '🎯 TRINITY SENSOR HIT!');
             
             // 2. AI SNIPER (Gemma confirms the math signal)
             const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode);
