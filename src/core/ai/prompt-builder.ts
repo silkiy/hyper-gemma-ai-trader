@@ -4,7 +4,12 @@ import { env } from '../../config/env.js';
 import { TradingStrategy } from '../../types/enum.types.js';
 
 export class PromptBuilder {
-  buildTradePrompt(marketData: MarketData, account: AccountStatus, memories: any[]): string {
+  buildTradePrompt(
+    marketData: MarketData, 
+    account: AccountStatus, 
+    memories: any[],
+    regimeContext?: { hurst: number, regime: string, trioDirection: string }
+  ): string {
     const strategy = env.TRADING_STRATEGY;
     
     const strategyInstructions = strategy === TradingStrategy.SCALPING 
@@ -18,13 +23,24 @@ export class PromptBuilder {
          2. Berikan ruang nafas bagi harga untuk bergerak.
          3. Target profit lebih lebar.`;
 
+    const regimeAlert = regimeContext ? `
+      MARKET REGIME ALERT (MANDATORY — DO NOT OVERRIDE):
+      Current Hurst: ${regimeContext.hurst.toFixed(2)}
+      Regime: ${regimeContext.regime}
+      Trio Direction: ${regimeContext.trioDirection}
+
+      RULE: If Regime = TRENDING, you MUST follow Trio Direction or return WAIT.
+      Returning the opposite direction is FORBIDDEN and will be blocked.
+    ` : '';
+
     const systemInstruction = `
       Anda adalah "Hyper-Gemma Ultra", AI Scalping Engine agresif.
       MISI: Eksekusi peluang dengan probabilitas profit tertinggi untuk Capital Multiplication.
       PRINSIP:
       ${strategyInstructions}
+      ${regimeAlert}
       1. WAJIB Risk-to-Reward Ratio (RRR) minimal 1:1.5.
-      2. KHUSUS AKUN $1: Gunakan Leverage 50x - 200x agar bisa masuk ke minimum order bursa ($5).
+      2. KHUSUS AKUN MIKRO: Gunakan Leverage tinggi (rata kanan) agar bisa masuk ke minimum order bursa ($5).
       3. Anda wajib memberikan target SL/TP dalam % pergerakan harga koin yang sangat ketat.
       ATURAN: Jawab HANYA dalam format JSON valid tanpa teks penjelasan.
     `;
