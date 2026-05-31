@@ -41,7 +41,7 @@ export class RiskManager {
     for (const pos of activePositions) {
       // RULE: Do not add size to the same coin
       // If we are checking a real trade decision (not a pre-scan check)
-      if (decision.final_summary !== 'PRE_SCAN_CHECK' && pos.symbol === (decision as any).symbol) {
+      if (decision.final_summary !== 'PRE_SCAN_CHECK' && pos.symbol === decision.symbol) {
         logger.warn({ symbol: pos.symbol }, 'TRADING BLOCKED: You already have a position in this coin.');
         return { 
           ...decision, 
