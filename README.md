@@ -54,7 +54,7 @@ Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur ekseku
 - **Hybrid Tactical Architecture** — Menggabungkan 3 jalur: Strategy Governor (Cold Path), QuantEngine (Hot Path), dan Gemma AI (Confirmation Path)
 - **Battle Directive System** — Gemma mengeluarkan "perintah perang" makro setiap jam yang menentukan bias, threshold, dan agresivitas
 - **Quant Trinity Engine** — Mesin matematika murni untuk deteksi peluang dalam milidetik (Z-Score + Hurst Exponent + VWAP)
-- **Regime-Aware Execution** — Otomatis memilih strategi: Trend Following (Hurst > threshold) atau Mean Reversion (Hurst ≤ threshold)
+- **Regime-Aware Execution** — Otomatis memilih strategi: Trend Following (Hurst ≥ threshold) atau Mean Reversion (Hurst < threshold)
 - **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING)
 - **Scan Mode System** — 3 mode pemindaian: VIP (major pairs), HOT50 (top volume), ALL (seluruh market)
 - **PAPER Mode Isolation** — Mode simulasi terisolasi: posisi mock dihitung dari session trades, bukan posisi exchange riil
@@ -90,6 +90,9 @@ Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur ekseku
 hyper-gemma-ai-trader/
 ├── src/
 │   ├── server.ts                    # Entry point utama (bootstrap + hybrid tactical engine)
+│   ├── config/                      # Konfigurasi aplikasi
+│   │   ├── env.ts                   # Environment schema validation (Zod)
+│   │   └── constants.ts             # Trading & market constants (MAX_LEVERAGE, RSI_PERIOD, dll)
 │   ├── core/                        # Logika inti (AI, Quant, Market, Risk)
 │   │   ├── ai/
 │   │   │   ├── decision-engine.ts   # Orkestrator keputusan AI + GEMMA_FLIP_BLOCKED guard
@@ -142,10 +145,27 @@ hyper-gemma-ai-trader/
 │   │   ├── json-validator.ts        # Validator JSON ketat (Zod schema: AIDecision + BattleDirective)
 │   │   ├── helpers.ts               # Utilitas: formatCurrency, formatCompactNumber, sleep
 │   │   └── logger.ts                # Logger configuration (Pino)
+│   ├── scripts/                     # Script utilitas dan testing
+│   │   ├── backtest.ts              # Script backtesting strategi
+│   │   ├── check-balance.ts         # Cek saldo akun Bitget
+│   │   ├── simulate-live.ts         # Simulasi trading live
+│   │   └── verify-all.ts            # Verifikasi semua komponen sistem
+│   ├── tests/                       # Unit & integration tests
+│   │   ├── unit/                    # Unit tests
+│   │   └── integration/             # Integration tests
 │   └── jobs/
 │       └── memory-consolidation.job.ts # Job konsolidasi memori harian
-├── .env                             # Environment variables
-├── package.json                     # Dependencies
+├── etc/                             # Dokumentasi & hasil testing
+│   ├── ai-promt.json                # Konfigurasi prompt AI & rencana pengembangan
+│   ├── BACKTEST_RESULTS.md          # Hasil backtesting
+│   ├── SIMULATION_RESULTS.md        # Hasil simulasi
+│   ├── FINAL_VERIFICATION.md        # Verifikasi final sistem
+│   └── GEMINI.md                    # Catatan AI assistant
+├── .env                             # Environment variables (tidak di-commit)
+├── .env.example                     # Template environment variables
+├── .gitignore                       # Git ignore rules
+├── LICENSE                          # MIT License
+├── package.json                     # Dependencies & scripts
 ├── tsconfig.json                    # TypeScript configuration
 └── README.md                        # Dokumentasi ini
 ```
