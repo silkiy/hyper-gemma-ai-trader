@@ -691,19 +691,22 @@ npm run dev
 |----------|-----------|---------|
 | `NODE_ENV` | Environment | `development` |
 | `LOG_LEVEL` | Level logging | `info` |
-| `MONGODB_URI` | URI koneksi MongoDB | — |
+| `PORT` | Port monitoring API (Fastify) | `3000` |
+| `MONGODB_URI` | URI koneksi MongoDB | — (wajib) |
 | `OLLAMA_BASE_URL` | URL server Ollama | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Model Ollama yang digunakan | `gemma:7b-instruct` |
+| `OLLAMA_MODEL` | Model Ollama yang digunakan | `gemma:7b-instruct` (kode), `gemma4:latest` (.env.example) |
 | `MOCK_AI` | Aktifkan mock AI (tanpa Ollama) | `false` |
-| `BITGET_API_KEY` | API Key Bitget | — |
-| `BITGET_SECRET_KEY` | Secret Key Bitget | — |
-| `BITGET_PASSPHRASE` | Passphrase Bitget | — |
+| `BITGET_API_KEY` | API Key Bitget | — (wajib) |
+| `BITGET_SECRET_KEY` | Secret Key Bitget | — (wajib) |
+| `BITGET_PASSPHRASE` | Passphrase Bitget | — (wajib) |
 | `BITGET_BASE_URL` | Base URL Bitget API | `https://api.bitget.com` |
-| `TRADING_MODE` | Mode trading | `PAPER` |
+| `TRADING_MODE` | Mode trading: `PAPER` (simulasi) atau `LIVE` | `PAPER` |
 | `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `2` |
-| `TRADING_STRATEGY` | Strategi trading AI | `SCALPING` |
-| `SCAN_MODE` | Mode pemindaian market | `VIP` |
+| `TRADING_STRATEGY` | Strategi trading: `SCALPING` / `INTRADAY` / `SWING` | `INTRADAY` |
+| `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT50` / `ALL` | `VIP` |
 | `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
+
+> **Catatan:** `env.ts` masih memiliki field legacy AsterDex (`ASTERDEX_USER_ADDRESS`, `ASTERDEX_API_KEY`, `ASTERDEX_SECRET`, `ASTERDEX_BASE_URL`) yang bersifat opsional dan tidak digunakan di runtime. Bisa dihapus saat cleanup.
 
 ---
 

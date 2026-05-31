@@ -1,7 +1,7 @@
 {
   "name": "hyper-gemma-ai-trader",
-  "version": "2.1.0",
-  "description": "Production-ready autonomous AI trading system using AsterDex, Ollama, Gemma, MongoDB, Node.js, and TypeScript",
+  "version": "3.0.0",
+  "description": "Production-ready autonomous AI trading system using Bitget, Ollama, Gemma 4, MongoDB, Node.js, and TypeScript",
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
