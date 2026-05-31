@@ -61,7 +61,7 @@ export class QuantEngine {
 
     // 5. REGIME-AWARE LOGIC
     const hurstThreshold = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.50 : 0.60;
-    const isTrending = hurst > hurstThreshold;
+    const isTrending = hurst >= hurstThreshold;
     const zThreshold = directive.bias === 'NEUTRAL' ? 2.2 : directive.z_score_threshold;
 
     let decision: TradeAction = TradeAction.SKIP;

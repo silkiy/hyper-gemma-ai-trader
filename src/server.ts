@@ -123,7 +123,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
           
           // Real-time Pulse Log (Trinity View)
           const thresholdSymbol = zScore < 0 ? `-${threshold.toFixed(2)}` : `+${threshold.toFixed(2)}`;
-          const regime = hurst > (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRND' : 'RNG';
+          const regime = hurst >= (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRND' : 'RNG';
           process.stdout.write(`\r[PULSE] ${pair} | Z: ${zScore.toFixed(2)} (${thresholdSymbol}) | H: ${hurst.toFixed(2)} [${regime}]      `);
 
           if (quantDecision) {
