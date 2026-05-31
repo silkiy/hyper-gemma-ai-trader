@@ -14,7 +14,7 @@
 
 **Hyper-Gemma AI Trader** adalah sistem trading cryptocurrency **otonom sepenuhnya** (fully autonomous) yang menggabungkan kecerdasan buatan **Gemma 4** (via Ollama) dengan **Quantitative Mathematics Engine** untuk trading futures di **Bitget Exchange** secara real-time.
 
-Sistem ini menggunakan arsitektur **Hybrid Tactical** — menggabungkan kecepatan kalkulasi matematika murni (Z-Score, Kalman Filter) dengan kecerdasan AI untuk konfirmasi keputusan. **QuantEngine** mendeteksi peluang dalam milidetik, lalu **Gemma AI** memvalidasi sebelum eksekusi.
+Sistem ini menggunakan arsitektur **Hybrid Tactical** — menggabungkan kecepatan kalkulasi matematika murni (**Quant Trinity**: Z-Score + Hurst Exponent + VWAP + Kalman Filter) dengan kecerdasan AI untuk konfirmasi keputusan. **QuantEngine** mendeteksi peluang dalam milidetik menggunakan regime-aware logic (Trend Following vs Mean Reversion), lalu **Gemma AI** memvalidasi sebelum eksekusi.
 
 ### 🎯 Filosofi Inti
 
