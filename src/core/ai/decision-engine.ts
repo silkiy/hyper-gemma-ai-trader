@@ -1,9 +1,12 @@
 import { ollamaClient } from './ollama-client.js';
 import { marketDataProvider } from '../../exchange/market-data.provider.js';
+import { bitgetClient } from '../../exchange/bitget.client.js';
+import { QuantUtils } from '../quant/quant-utils.js';
 import { riskManager } from '../risk/risk-manager.js';
 import { promptBuilder } from './prompt-builder.js';
 import { tradeRepository } from '../../database/repositories/trade.repository.js';
 import { logger } from '../../utils/logger.js';
+import { env } from '../../config/env.js';
 import type { AIDecision } from '../../types/ai.types.js';
 import { SessionMode, TradeAction, MarketRegime, RiskLevel, PositionSize } from '../../types/enum.types.js';
 import { formatCompactNumber } from '../../utils/helpers.js';
@@ -48,10 +51,52 @@ export class DecisionEngine {
       }
 
       // 4. Build Prompt
-      const prompt = promptBuilder.buildTradePrompt(marketData, accountStatus, memories);
+      // Calculate regime context to inject into prompt
+      const pricesRawPrompt = await bitgetClient.getPriceHistory(pair, env.TRADING_STRATEGY === 'SCALPING' ? '5m' : '1h', 100);
+      const hurstValPrompt = QuantUtils.hurstExponent(pricesRawPrompt);
+      const zScorePrompt = QuantUtils.calculateZScore(pricesRawPrompt.slice(-20));
+      let trioDirPrompt = 'NEUTRAL';
+      if (zScorePrompt <= -1.0) trioDirPrompt = 'LONG';
+      else if (zScorePrompt >= 1.0) trioDirPrompt = 'SHORT';
+
+      const prompt = promptBuilder.buildTradePrompt(marketData, accountStatus, memories, {
+        hurst: hurstValPrompt,
+        regime: hurstValPrompt > (currentMode === SessionMode.NORMAL ? 0.60 : 0.50) ? 'TRENDING' : 'RANGING',
+        trioDirection: trioDirPrompt
+      });
 
       // 5. Get AI Decision
       const aiDecision = await ollamaClient.generateDecision(prompt);
+      aiDecision.symbol = pair; // FIX 2: Type-safe symbol injection
+
+      // FIX 1: Hard Constraint - Block Gemma Flip in TRENDING regime
+      const hurstThreshold = env.TRADING_STRATEGY === 'SCALPING' ? 0.50 : 0.60;
+      const ohlcvLong = await marketDataProvider.getMarketData(pair); // This returns formatted data
+      
+      // We need the raw signals from the math engine to compare with AI decision
+      const pricesRaw = await bitgetClient.getPriceHistory(pair, env.TRADING_STRATEGY === 'SCALPING' ? '5m' : '1h', 100);
+      const hurstValue = QuantUtils.hurstExponent(pricesRaw);
+      const isTrending = hurstValue >= hurstThreshold; // FIX 1: Inclusive check
+
+      if (isTrending) {
+        // Determine what the math signal WAS (Trio Direction)
+        const pricesShort = pricesRaw.slice(-20);
+        const kalmanPrice = QuantUtils.applyKalmanFilter(pricesShort, 0.1);
+        
+        // Accurate Trio Direction: If price is above average, trend is LONG.
+        const trioDirection = marketData.current_price >= kalmanPrice ? 'LONG' : 'SHORT';
+
+        // GUARD: If Trending and AI tries to flip math direction -> Force WAIT
+        if (trioDirection === 'LONG' && aiDecision.decision === TradeAction.SHORT) {
+          logger.warn({ pair, hurst: hurstValue.toFixed(2) }, '⚠️ GEMMA_FLIP_BLOCKED: AI tried to SHORT during Bullish Trending regime.');
+          aiDecision.decision = TradeAction.WAIT;
+          aiDecision.final_summary = 'Blocked: AI tried to flip direction against Trending regime.';
+        } else if (trioDirection === 'SHORT' && aiDecision.decision === TradeAction.LONG) {
+          logger.warn({ pair, hurst: hurstValue.toFixed(2) }, '⚠️ GEMMA_FLIP_BLOCKED: AI tried to LONG during Bearish Trending regime.');
+          aiDecision.decision = TradeAction.WAIT;
+          aiDecision.final_summary = 'Blocked: AI tried to flip direction against Trending regime.';
+        }
+      }
 
       // 6. Final Validation with Risk Manager
       const finalDecision = riskManager.validateDecision(aiDecision, accountStatus, currentMode);
