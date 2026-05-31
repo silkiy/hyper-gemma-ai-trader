@@ -34,29 +34,30 @@ Sistem ini menggunakan arsitektur **Hybrid Tactical** — menggabungkan kecepata
 Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur eksekusi:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    SERVER (Entry Point)               │
-│        Hybrid Tactical Engine + Strategy Router       │
-├──────────┬──────────┬──────────┬────────────────────┤
-│   API    │  CORE    │ EXCHANGE │    SERVICES         │
-│ (Fastify)│(AI/Quant)│ (Bitget) │  (Trade Orchestr.)  │
-├──────────┴──────────┴──────────┴────────────────────┤
-│                   DATABASE (MongoDB)                  │
-│     Models → Repositories → Mongoose (Directive)      │
-├─────────────────────────────────────────────────────┤
+┌───────────────────────────────────────────────────────┐
+│                  SERVER (Entry Point)                 │
+│    Hybrid Tactical Engine + Quant Trinity Router      │
+├─────────────┬──────────┬──────────┬───────────────────┤
+│     API     │   CORE   │ EXCHANGE │     SERVICES      │
+│  (Fastify)  │(AI/Quant)│ (Bitget) │ (Trade Orchestr.) │
+├─────────────┴──────────┴──────────┴───────────────────┤
+│                  DATABASE (MongoDB)                   │
+│    Models → Repositories → Mongoose (Directive)       │
+├───────────────────────────────────────────────────────┤
 │              MONITORING & UTILITIES                   │
-│      Prometheus │ Health Check │ Alert Manager         │
-└─────────────────────────────────────────────────────┘
+│     Prometheus │ Health Check │ Alert Manager         │
+└───────────────────────────────────────────────────────┘
 ```
 
 ### Arsitektur Detail:
 
 - **Hybrid Tactical Architecture** — Menggabungkan 3 jalur: Strategy Governor (Cold Path), QuantEngine (Hot Path), dan Gemma AI (Confirmation Path)
 - **Battle Directive System** — Gemma mengeluarkan "perintah perang" makro setiap jam yang menentukan bias, threshold, dan agresivitas
-- **QuantEngine** — Mesin matematika murni untuk deteksi peluang dalam milidetik (Z-Score + Kalman Filter)
+- **Quant Trinity Engine** — Mesin matematika murni untuk deteksi peluang dalam milidetik (Z-Score + Hurst Exponent + VWAP)
+- **Regime-Aware Execution** — Otomatis memilih strategi: Trend Following (Hurst > threshold) atau Mean Reversion (Hurst ≤ threshold)
 - **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING)
 - **Scan Mode System** — 3 mode pemindaian: VIP (major pairs), HOT50 (top volume), ALL (seluruh market)
-- **PAPER/LIVE Trading** — Mendukung mode simulasi tanpa KYC dan mode live trading
+- **PAPER Mode Isolation** — Mode simulasi terisolasi: posisi mock dihitung dari session trades, bukan posisi exchange riil
 - **AI Feedback Loop** — Hasil trading sebelumnya diinjeksikan ke prompt AI
 - **Self-Learning Memory** — MongoDB menyimpan pelajaran dari kesalahan
 - **Risk First Trading System** — Risk Manager sebagai penjaga terakhir sebelum eksekusi
@@ -91,14 +92,14 @@ hyper-gemma-ai-trader/
 │   ├── server.ts                    # Entry point utama (bootstrap + hybrid tactical engine)
 │   ├── core/                        # Logika inti (AI, Quant, Market, Risk)
 │   │   ├── ai/
-│   │   │   ├── decision-engine.ts   # Orkestrator keputusan trading AI (Confirmation Path)
+│   │   │   ├── decision-engine.ts   # Orkestrator keputusan AI + GEMMA_FLIP_BLOCKED guard
 │   │   │   ├── strategy-governor.ts # Gubernur Strategi Makro (Cold Path / Commander)
 │   │   │   ├── ollama-client.ts     # HTTP client untuk Ollama API (generic + validated JSON)
 │   │   │   ├── prompt-builder.ts    # Builder prompt dinamis untuk Gemma
 │   │   │   └── learning-engine.ts   # Engine pembelajaran dari kesalahan
 │   │   ├── quant/
 │   │   │   ├── quant-engine.ts      # Mesin trading matematika kecepatan tinggi (Hot Path)
-│   │   │   └── quant-utils.ts       # Utilitas: Z-Score, Kalman Filter, Velocity
+│   │   │   └── quant-utils.ts       # Utilitas: Z-Score, Hurst, VWAP, Kalman, Velocity
 │   │   ├── market/
 │   │   │   ├── indicator-engine.ts  # Kalkulator indikator teknikal (EMA, RSI, ATR)
 │   │   │   └── market-regime.ts     # Deteksi regime market (Trending/Ranging/Volatile)
@@ -139,6 +140,7 @@ hyper-gemma-ai-trader/
 │   │   └── enum.types.ts            # Enum untuk trading strategy, mode, action, dll
 │   ├── utils/
 │   │   ├── json-validator.ts        # Validator JSON ketat (Zod schema: AIDecision + BattleDirective)
+│   │   ├── helpers.ts               # Utilitas: formatCurrency, formatCompactNumber, sleep
 │   │   └── logger.ts                # Logger configuration (Pino)
 │   └── jobs/
 │       └── memory-consolidation.job.ts # Job konsolidasi memori harian
@@ -172,18 +174,25 @@ Gemma bertindak sebagai **"Gubernur Strategi"** yang mengeluarkan **Battle Direc
 
 ---
 
-### 2. ⚡ QuantEngine (Hot Path / Math Sensor)
+### 2. ⚡ QuantEngine — Quant Trinity (Hot Path / Math Sensor)
 
 **File:** `src/core/quant/quant-engine.ts`
 
-Mesin trading matematika murni yang bekerja dalam **milidetik** tanpa memanggil AI:
+Mesin trading matematika murni yang bekerja dalam **milidetik** tanpa memanggil AI, menggunakan **3 sinyal utama (Trinity)**:
 
-- **Z-Score Detection** — Mendeteksi deviasi harga dari rata-rata (mean reversion signal)
-- **Kalman Filter** — Memfilter noise harga untuk menemukan "True Trend" tanpa lag
-- **Micro-Bounce Confirmation** — Anti-falling-knife: hanya entry jika harga sudah bouncing ke arah yang benar
-- **Directive-Driven** — Menggunakan `z_score_threshold` dan `bias` dari Battle Directive
-- **Instant Decision** — Menghasilkan `AIDecision` lengkap (confidence, leverage, regime) tanpa latency AI
+- **OHLCV Data Pipeline** — Mengambil data candlestick lengkap (Open, High, Low, Close, Volume) via `getOHLCVHistory()` dari Bitget
+- **Dual Window Analysis** — Menggunakan 2 jendela data:
+  - **Short Window (20 candles)** → Untuk Z-Score (anomali jangka pendek)
+  - **Long Window (100 candles)** → Untuk Hurst Exponent (deteksi regime)
+- **Regime-Aware Execution Logic** — Otomatis memilih strategi berdasarkan Hurst Exponent:
+  - **MODE A: Trend Following** (Hurst ≥ threshold) → Entry pada Kalman Bullish + Price above VWAP (momentum sehat)
+  - **MODE B: Mean Reversion** (Hurst < threshold) → Entry pada Z-Score extreme + Micro-Bounce + Value area (dekat/di bawah VWAP)
+- **VWAP Confirmation** — Daily VWAP (reset 00:00 UTC) sebagai value/premium area detector
+- **Kalman Trend Filter** — Anti-noise: konfirmasi arah trend via Kalman Filter yang dikontrol oleh `kalman_aggressiveness` dari Directive
+- **Directive-Driven** — Menggunakan `z_score_threshold`, `bias`, dan `kalman_aggressiveness` dari Battle Directive
+- **Strategy-Adaptive Hurst Threshold** — SCALPING: `>= 0.50`, INTRADAY/SWING: `>= 0.60` (inclusive `>=` — konsisten di QuantEngine, DecisionEngine, dan Server)
 - **NEUTRAL Safety** — Jika bias NEUTRAL, menggunakan threshold ketat 2.2 untuk kedua arah
+- **Instant Decision** — Menghasilkan `AIDecision` lengkap (confidence, leverage, regime, hurst, vwap deviation) tanpa latency AI
 
 **File:** `src/core/quant/quant-utils.ts`
 
@@ -191,9 +200,24 @@ Utilitas matematika yang digunakan oleh QuantEngine:
 
 | Fungsi | Deskripsi |
 |--------|-----------|
-| `calculateZScore(prices)` | Mengukur deviasi standar harga terakhir dari mean |
+| `calculateZScore(prices)` | Mengukur deviasi standar harga terakhir dari mean (short window) |
+| `hurstExponent(prices)` | **[NEW]** Rescaled Range (R/S) analysis untuk deteksi regime: H < 0.45 = mean-reverting, H > 0.55 = trending |
+| `calculateVWAP(ohlcv)` | **[NEW]** Volume Weighted Average Price: Σ(TP × Vol) / Σ(Vol) |
+| `vwapDeviation(price, vwap)` | **[NEW]** Deviasi harga terhadap VWAP dalam persentase |
 | `applyKalmanFilter(prices, noise)` | Filter noise harga tanpa lag moving average |
 | `calculateVelocity(prices)` | Linear regression untuk menghitung kecepatan perubahan harga |
+
+**OHLCV Interface:**
+```typescript
+interface OHLCV {
+  t: number;  // timestamp
+  o: number;  // open
+  h: number;  // high
+  l: number;  // low
+  c: number;  // close
+  v: number;  // volume
+}
+```
 
 ---
 
@@ -207,13 +231,36 @@ Membangun prompt terstruktur dalam Bahasa Indonesia untuk model Gemma:
   - `SCALPING` → **Aggressive Scalping** — fokus Volatility Bursts, Volume Spikes, Price Anomalies, profit instan
   - `INTRADAY/SWING` → Konfirmasi trend solid, ruang nafas untuk SL, target profit lebar
 - **System Instruction** — Persona **"Hyper-Gemma Ultra"** sebagai AI Scalping Engine agresif
-- **Small Account Optimization** — Instruksi leverage 50x-200x khusus akun kecil agar memenuhi minimum order $5
+- **Regime Context Injection** — **[NEW]** Menyuntikkan `regimeContext` (Hurst, regime TRENDING/RANGING, Trio Direction) ke prompt:
+  - `MARKET REGIME ALERT (MANDATORY)` — Jika regime = TRENDING, Gemma WAJIB mengikuti Trio Direction atau return WAIT
+  - Mencegah AI mengembalikan arah berlawanan (ditegakkan oleh `GEMMA_FLIP_BLOCKED` di Decision Engine)
+- **Small Account Optimization** — Instruksi leverage tinggi (rata kanan) khusus akun mikro agar memenuhi minimum order $5
 - **Tight SL/TP Instruction** — Wajib memberikan target SL/TP dalam % pergerakan harga yang ketat
 - **Enhanced Market Context** — Menyertakan `high_24h` dan `low_24h` untuk analisis range harian
 - **Account Context** — Menyertakan equity, PnL harian, dan loss streak
 - **Memory Injection** — Menyuntikkan pelajaran dari trading sebelumnya
 - **Response Schema** — Memaksa output JSON dengan format ketat (12 field)
 - **Prinsip Capital Multiplication** — Eksekusi peluang dengan probabilitas profit tertinggi
+
+---
+
+### 3.5. 🛡️ Decision Engine — AI Sniper + GEMMA_FLIP_BLOCKED
+
+**File:** `src/core/ai/decision-engine.ts`
+
+Orkestrator keputusan trading AI yang menggabungkan analisis Gemma dengan **hard constraint** matematika:
+
+- **Pre-AI Risk Check** — Memeriksa posisi penuh atau safety risk sebelum memanggil AI
+- **Continuous Learning** — Menginjeksikan 5 trade terakhir sebagai pelajaran ke prompt (threshold: minimal 5 trades)
+- **Regime Context Injection** — Menghitung Hurst dan Z-Score secara independen untuk menyuntikkan context ke Prompt Builder
+- **GEMMA_FLIP_BLOCKED (Hard Constraint)** — **Fitur kritis** yang mencegah Gemma membalik arah trading saat regime TRENDING:
+  - Menghitung `trioDirection` dari Kalman Filter (harga ≥ kalman = LONG, harga < kalman = SHORT)
+  - Jika regime TRENDING dan Gemma mencoba arah berlawanan → **Force WAIT**
+  - Contoh: Jika `trioDirection = LONG` dan Gemma return `SHORT` → Diblokir dengan log `⚠️ GEMMA_FLIP_BLOCKED`
+  - Menggunakan **inclusive** Hurst check (`>=` threshold) — konsisten dengan QuantEngine
+- **Symbol Injection** — Menyuntikkan `symbol` ke keputusan AI (type-safe)
+- **Final Risk Validation** — Keputusan AI divalidasi ulang oleh Risk Manager sebelum eksekusi
+- **Fallback Decision** — Jika engine gagal, mengembalikan `SKIP` dengan `risk_level: HIGH`
 
 ---
 
@@ -268,7 +315,7 @@ Mengklasifikasikan kondisi market saat ini berdasarkan indikator:
 Layer perlindungan modal yang dapat meng-override keputusan AI:
 
 - **Dynamic Max Positions** — Membatasi jumlah posisi aktif berdasarkan `MAX_POSITIONS` di environment (default: 2, configurable)
-- **Duplicate Position Block** — Memblokir pembukaan posisi baru pada koin yang sudah dipegang (cegah double exposure)
+- **Duplicate Position Block** — Memblokir pembukaan posisi baru pada koin yang sudah dipegang (type-safe: `decision.symbol`)
 - **Strategy-Dynamic Liquidation Safety** — Threshold likuidasi berbeda per strategi:
   - `SCALPING` → 15% jarak minimum ke harga likuidasi (lebih toleran karena leverage tinggi)
   - `INTRADAY/SWING` → 30% jarak minimum (lebih konservatif)
@@ -340,6 +387,11 @@ Aggregator data market yang menggabungkan raw data dari Bitget dengan indikator 
 - **Aggregated Account Metrics** — Menghitung equity, available balance, margin ratio, maintenance margin, margin balance, dan total wallet balance
 - **Active Position Filtering** — Filter posisi dengan `total ≠ 0` dan normalisasi field names
 - **Virtual Balance Fallback** — Dalam PAPER mode dengan $0 balance, menyediakan virtual $1.00 untuk simulasi
+- **PAPER Mode Position Isolation** — Dalam PAPER mode, posisi riil di exchange diabaikan:
+  - Mock positions dibangun dari `sessionTrades` di sesi aktif saat ini
+  - Setiap mock position menggunakan 10% estimated margin usage
+  - Hanya trade dari `currentSessionId` yang dihitung (isolasi antar sesi)
+  - Mencegah double-counting saat restart simulasi
 
 ---
 
@@ -448,7 +500,7 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 | Komponen | Tipe | Jadwal | Deskripsi |
 |----------|------|--------|-----------|
 | **Strategy Governor** | Cron `0 * * * *` | Setiap 1 jam | Gemma mengeluarkan Battle Directive baru |
-| **Hybrid Tactical Loop** | `while(true)` | Terus-menerus | QuantEngine scan → Gemma confirm → Execute |
+| **Hybrid Tactical Loop** | `while(true)` | Terus-menerus | Trinity scan (Z+Hurst+VWAP) → Gemma confirm → Execute |
 | **Memory Consolidation** | Cron `0 0 * * *` | Setiap tengah malam | Konsolidasi pelajaran harian |
 
 **Hybrid Tactical Loop:**
@@ -464,10 +516,12 @@ runHybridTradingLoop(mode) {
        - HOT50: Top 50 by volume
        - ALL: Seluruh market
     4. Loop setiap hot pair:
-       a. 📊 MATH SENSOR (Instant):
-          - Ambil price history → Hitung Z-Score
-          - Real-time pulse log: [QUANT PULSE] BTCUSDT | Z: -1.85 (Target: -1.50)
-          - Jika Z-Score melampaui threshold → Hit!
+       a. 📊 TRINITY SENSOR (Instant, 100 candles):
+          - Ambil OHLCV history → Hitung Z-Score (20 candle) + Hurst (100 candle) + VWAP
+          - Determine regime: Hurst >= threshold → TRENDING, else → RANGING
+          - Pulse log: [PULSE] BTCUSDT | Z: -1.85 (-1.50) | H: 0.62 [TRND]
+          - MODE A (Trending, H ≥ threshold): Kalman + VWAP momentum → Hit!
+          - MODE B (Ranging, H < threshold): Z-Score extreme + Bounce + VWAP value area → Hit!
        b. 🤖 AI SNIPER (Gemma confirms):
           - Kirim ke Decision Engine → Gemma validasi
           - Jika LONG/SHORT → TACTICAL STRIKE → Execute
@@ -488,8 +542,8 @@ runHybridTradingLoop(mode) {
 | `ALL` | Semua | Seluruh pasangan di Bitget USDT-FUTURES |
 
 **Engine Features:**
-- **Real-time Pulse Log** — Visual tracking Z-Score setiap pair di terminal (`\r` overwrite)
-- **Math-First, AI-Second** — QuantEngine (milidetik) → Gemma AI (detik) hanya jika math signal aktif
+- **Real-time Trinity Pulse** — Visual tracking Z-Score + Hurst + Regime setiap pair di terminal (`\r` overwrite)
+- **Trinity-First, AI-Second** — QuantEngine Trinity (milidetik) → Gemma AI (detik) hanya jika Trinity signal aktif
 - **Smart Safety Block** — Khusus block hanya untuk `Blocked: Safety` (bukan max positions), wait 10s
 - **Tactical Strike/Veto** — Logging eksplisit untuk setiap keputusan (konfirmasi atau tolak)
 - **API-Friendly** — Micro-delay 50ms antar pair evaluation
@@ -583,10 +637,10 @@ Client untuk Ollama API yang mendukung dua mode generasi:
  │       │     ├─ Fetch All Tickers → Filter by SCAN_MODE (VIP/HOT50/ALL)
  │       │     │
  │       │     ├─ Loop hot pairs:
- │       │     │     ├─ 📊 MATH SENSOR: Z-Score + Kalman vs Directive threshold
- │       │     │     ├─ [QUANT PULSE] Real-time terminal visualization
+ │       │     │     ├─ 📊 TRINITY SENSOR: OHLCV → Z-Score + Hurst + VWAP
+ │       │     │     ├─ [PULSE] Regime detection: TRND (Trend) or RNG (Range)
  │       │     │     │
- │       │     │     ├─ If MATH HIT:
+ │       │     │     ├─ If TRINITY HIT (Mode A: Trend H≥T / Mode B: Reversion H<T):
  │       │     │     │     ├─ 🤖 AI SNIPER: Gemma confirms/vetoes
  │       │     │     │     ├─ ⚡ TACTICAL STRIKE → Auto-Leverage → Execute → SL/TP
  │       │     │     │     └─ ❌ TACTICAL VETO → Skip → Next pair
@@ -656,19 +710,24 @@ npm run dev
 ## 🔮 Roadmap & Scalability
 
 ### ✅ Sudah Diimplementasi
-- [x] **Hybrid Tactical Architecture** (QuantEngine + Gemma AI Confirmation)
+- [x] **Hybrid Tactical Architecture** (Quant Trinity + Gemma AI Confirmation)
 - [x] **Strategy Governor / Battle Directive System** (Gemma sebagai Commander setiap jam)
-- [x] **QuantEngine** (Z-Score + Kalman Filter + Micro-Bounce detection)
+- [x] **Quant Trinity Engine** (Z-Score + Hurst Exponent + VWAP + Kalman Filter)
+- [x] **Regime-Aware Execution** (Trend Following vs Mean Reversion berdasarkan Hurst)
+- [x] **Dual Window Analysis** (Short 20 candles + Long 100 candles)
+- [x] **OHLCV Data Pipeline** (Full candlestick data dari Bitget)
 - [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, plan orders)
-- [x] **PAPER / LIVE Trading Mode** (simulasi tanpa KYC, virtual $1 balance)
+- [x] **PAPER Mode Position Isolation** (mock positions dari session trades, bukan exchange riil)
 - [x] **Scan Mode System** (VIP / HOT50 / ALL)
-- [x] **Real-time Quant Pulse Log** (terminal Z-Score visualization)
+- [x] **Real-time Trinity Pulse** (Z-Score + Hurst + Regime terminal visualization)
 - [x] AI Decision Engine dengan Gemma 4
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
 - [x] **Auto-Leverage Optimization** (auto-increase + exchange-aware cap)
 - [x] **Strategy-Dynamic SL/TP** (Bitget Plan Orders, mark_price trigger)
 - [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
 - [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
+- [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
+- [x] **Regime Context Prompt Injection** (Hurst + regime + trioDirection disuntikkan ke prompt Gemma)
 - [x] **Validated JSON for Both AI Schemas** (AIDecision + BattleDirective via Zod)
 - [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
 - [x] Risk Management & Leverage Cap (500x)
@@ -684,6 +743,8 @@ npm run dev
 - [x] Comprehensive Type Safety (Zod + TypeScript)
 - [x] **Enhanced Market Data** (high_24h, low_24h untuk analisis range)
 - [x] **Clean Error Logging** (axios error message only, bukan full object)
+- [x] **Hurst-Adaptive Strategy Selection** (SCALPING H>=0.50, INTRADAY H>=0.60 — inclusive)
+- [x] **VWAP Value/Premium Area Detection** (daily reset 00:00 UTC)
 
 ### 🔜 Rencana Pengembangan
 - [ ] Multi-agent trading
