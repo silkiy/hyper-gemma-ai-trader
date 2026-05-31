@@ -1,4 +1,4 @@
-import { asterdexClient } from './asterdex.client.js';
+import { bitgetClient } from './bitget.client.js';
 import type { AIDecision } from '../types/ai.types.js';
 import { logger } from '../utils/logger.js';
 import { TradeAction } from '../types/enum.types.js';
@@ -6,155 +6,114 @@ import { marketDataProvider } from './market-data.provider.js';
 import { env } from '../config/env.js';
 
 export class OrderExecutor {
-  private readonly MIN_NOTIONAL = 5.1; // $5.1 to be safe against exchange min $5
+  private readonly MIN_NOTIONAL = 5.1; 
 
   async executeOrder(decision: AIDecision, symbol: string): Promise<{ orderId: string; status: string; price: number }> {
-    const cleanSymbol = symbol.replace('/', '').replace('-', '');
-    
     logger.info({ 
       action: decision.decision, 
-      leverage: decision.leverage_suggestion,
-      size: decision.position_size,
-      symbol: cleanSymbol
-    }, 'Executing ASTERDEX Pro API order');
+      symbol: symbol
+    }, 'Executing Bitget V2 order');
 
     try {
-      // 1. Force CROSSED margin to allow 80% buffer to work
-      await asterdexClient.setMarginType(symbol, 'CROSSED');
-
-      // 2. Fetch latest price for quantity calculation
+      // 1. Fetch latest price and account status
       const marketData = await marketDataProvider.getMarketData(symbol);
       const price = marketData.current_price;
       const accountStatus = await marketDataProvider.getAccountStatus();
 
-      // 3. Calculate Quantity to meet MIN_NOTIONAL ($5)
-      // Fetch precision info for the symbol
-      const symbolInfo = await asterdexClient.getSymbolInfo(symbol);
+      // 2. Fetch precision and leverage limits directly from bursa
+      const symbolInfo = await bitgetClient.getSymbolInfo(symbol);
       const precision = symbolInfo.quantityPrecision;
       const pricePrecision = symbolInfo.pricePrecision;
-      
+      const maxExchangeLeverage = symbolInfo.maxLeverage;
+
+      logger.info({ symbol, maxExchangeLeverage, pricePrecision }, 'Bitget V2 Symbol Data');
+
+      // 3. Calculate Quantity to meet MIN_NOTIONAL ($5)
       const rawQuantity = this.MIN_NOTIONAL / price;
-      
-      // Use Math.ceil with precision to ensure we are ALWAYS >= MIN_NOTIONAL
       const multiplier = Math.pow(10, precision);
       const quantityStr = (Math.ceil(rawQuantity * multiplier) / multiplier).toFixed(precision);
-      const quantity = parseFloat(quantityStr);
       
-      // PRE-CHECK & AUTO-LEVERAGE OPTIMIZATION
+      // 4. AUTO-LEVERAGE OPTIMIZATION (Rata Kanan)
       const available = accountStatus.available_balance || 0;
       const minNotional = this.MIN_NOTIONAL;
-      let leverage = decision.leverage_suggestion;
-
-      // 1. Calculate minimum leverage needed to afford this trade
-      // (minNotional / leverage) must be <= available balance
-      const minNeededLeverage = Math.ceil(minNotional / (available * 0.9)); // 10% buffer
       
-      if (leverage < minNeededLeverage) {
-        logger.info({ suggested: leverage, required: minNeededLeverage }, 'Auto-increasing leverage to meet minimum margin requirements');
-        leverage = minNeededLeverage;
-      }
-
-      // 2. Cap leverage for altcoins (BTC/ETH can go higher, others usually max 50x-75x)
-      const isMajor = symbol.startsWith('BTC') || symbol.startsWith('ETH');
-      const maxSafeLeverage = isMajor ? 200 : 50;
+      // Calculate minimum leverage needed with 10% buffer
+      const minNeededLeverage = Math.ceil(minNotional / (available * 0.9)); 
       
-      if (leverage > maxSafeLeverage) {
-        logger.info({ requested: leverage, capped: maxSafeLeverage }, 'Capping leverage to safe exchange limits');
-        leverage = maxSafeLeverage;
-      }
+      // Use maximum possible leverage (capped by exchange)
+      let finalLeverage = Math.max(decision.leverage_suggestion, minNeededLeverage);
+      if (finalLeverage > maxExchangeLeverage) finalLeverage = maxExchangeLeverage;
 
-      // 3. Final check: Can we actually afford this now?
-      // Add a 20% buffer to account for exchange fees, slippage and minimum wallet requirements
-      const finalRequiredMargin = (minNotional / leverage) * 1.20;
-      if (finalRequiredMargin > available) {
-        const errorMsg = `Margin unsafe for ${symbol}. Need ~$${finalRequiredMargin.toFixed(4)} (inc. buffer), have $${available.toFixed(4)}`;
-        logger.warn(errorMsg);
+      // Final Affordability Check
+      const requiredMargin = minNotional / finalLeverage;
+      const safeAvailable = available * 0.98; // 2% for safety/fees
+
+      if (requiredMargin > safeAvailable) {
+        const errorMsg = `CANNOT AFFORD ${symbol}: Needs $${requiredMargin.toFixed(4)} margin, have $${available.toFixed(4)}. (Max Lev: ${maxExchangeLeverage}x)`;
+        logger.error(errorMsg);
         throw new Error(errorMsg);
       }
 
-      // Map TradeAction to Side
-      const side = decision.decision === TradeAction.LONG ? 'BUY' : 'SELL';
-      
-      logger.info({ 
-        targetNotional: minNotional, 
-        calcQuantity: quantityStr, 
-        finalLeverage: leverage,
-        estimatedMargin: finalRequiredMargin.toFixed(4),
-        availableBalance: available.toFixed(4)
-      }, 'Order calculation complete (Optimized)');
+      // Set Leverage first
+      await bitgetClient.setLeverage(symbol, finalLeverage);
 
-      const order = await asterdexClient.placeOrder({
+      // 5. Execute Market Order
+      const side: 'buy' | 'sell' = decision.decision === TradeAction.LONG ? 'buy' : 'sell';
+      
+      const orderResponse = await bitgetClient.placeOrder({
         symbol: symbol,
         side: side,
-        type: 'MARKET',
-        quantity: quantityStr,
-        leverage: leverage
+        orderType: 'market',
+        size: quantityStr
       });
 
-      const orderId = order.orderId || `aster-pro-${Math.random().toString(36).substr(2, 9)}`;
-      logger.info({ orderId }, 'Order executed successfully on ASTERDEX Pro API');
+      const orderId = orderResponse.data.orderId;
+      logger.info({ orderId, leverage: finalLeverage }, 'Order executed successfully on Bitget V2');
 
-      // 4. Automated Stop Loss & Take Profit (Dynamic based on Strategy)
+      // 6. Automated SL/TP (Plan Orders)
       try {
-        const side = decision.decision === TradeAction.LONG ? 'BUY' : 'SELL';
-        const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
-        
-        // Define strategy-based percentages
-        let slPercent = 0.01; // 1% default
-        let tpPercent = 0.015; // 1.5% default
+        let slPercent = 0.015; 
+        let tpPercent = 0.025; 
 
         const strategy = env.TRADING_STRATEGY;
-        if (strategy === 'SCALPING') {
-          slPercent = 0.005; // 0.5% SL
-          tpPercent = 0.0075; // 0.75% TP
-        } else if (strategy === 'SWING') {
-          slPercent = 0.03; // 3% SL
-          tpPercent = 0.10; // 10% TP
+        if (strategy === 'SWING') {
+          slPercent = 0.03;
+          tpPercent = 0.10;
         }
 
-        const slPrice = side === 'BUY' 
-          ? price * (1 - slPercent) 
-          : price * (1 + slPercent);
-          
-        const tpPrice = side === 'BUY'
-          ? price * (1 + tpPercent)
-          : price * (1 - tpPercent);
+        const slPrice = side === 'buy' ? price * (1 - slPercent) : price * (1 + slPercent);
+        const tpPrice = side === 'buy' ? price * (1 + tpPercent) : price * (1 - tpPercent);
 
-        logger.info({ 
-          strategy,
-          slPrice: slPrice.toFixed(pricePrecision), 
-          tpPrice: tpPrice.toFixed(pricePrecision),
-          rr: `1:${(tpPercent / slPercent).toFixed(1)}`
-        }, 'Placing automated SL/TP orders...');
+        logger.info({ slPrice: slPrice.toFixed(pricePrecision), tpPrice: tpPrice.toFixed(pricePrecision) }, 'Placing Bitget V2 SL/TP...');
 
-        // Place Stop Loss
-        await asterdexClient.placeOrder({
-          symbol: symbol,
-          side: closeSide,
-          type: 'STOP_MARKET',
-          quantity: quantityStr,
-          stopPrice: slPrice.toFixed(pricePrecision),
-          reduceOnly: true
+        // Place Stop Loss Plan
+        await bitgetClient.placePlanOrder({
+          symbol,
+          side: side === 'buy' ? 'sell' : 'buy', // Exit side
+          orderType: 'market',
+          size: quantityStr,
+          triggerPrice: slPrice.toFixed(pricePrecision),
+          triggerType: 'mark_price'
         });
 
-        // Place Take Profit
-        await asterdexClient.placeOrder({
-          symbol: symbol,
-          side: closeSide,
-          type: 'TAKE_PROFIT_MARKET',
-          quantity: quantityStr,
-          stopPrice: tpPrice.toFixed(pricePrecision),
-          reduceOnly: true
+        // Place Take Profit Plan
+        await bitgetClient.placePlanOrder({
+          symbol,
+          side: side === 'buy' ? 'sell' : 'buy', // Exit side
+          orderType: 'market',
+          size: quantityStr,
+          triggerPrice: tpPrice.toFixed(pricePrecision),
+          triggerType: 'mark_price'
         });
 
-        logger.info('SL/TP orders placed successfully.');
-      } catch (sltpError) {
-        logger.warn({ sltpError }, 'Failed to place automated SL/TP orders. Position is open WITHOUT protection!');
+        logger.info('Bitget V2 SL/TP orders active.');
+      } catch (planError: any) {
+        logger.warn({ error: planError.message }, 'Failed to place SL/TP Plan orders.');
       }
       
       return { orderId, status: 'FILLED', price };
-    } catch (error) {
-      logger.error({ error }, 'Failed to execute order on ASTERDEX Pro API');
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Bitget V2 Execution Failed');
       throw error;
     }
   }

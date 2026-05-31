@@ -6,6 +6,7 @@ import { tradeRepository } from '../../database/repositories/trade.repository.js
 import { logger } from '../../utils/logger.js';
 import type { AIDecision } from '../../types/ai.types.js';
 import { SessionMode, TradeAction, MarketRegime, RiskLevel, PositionSize } from '../../types/enum.types.js';
+import { formatCompactNumber } from '../../utils/helpers.js';
 
 export class DecisionEngine {
   async evaluateTrade(pair: string, currentMode: SessionMode): Promise<AIDecision> {
@@ -20,7 +21,7 @@ export class DecisionEngine {
         symbol: marketData.pair,
         lastPrice: marketData.current_price,
         change24h: `${marketData.price_change_24h}%`,
-        volume24h: marketData.volume_24h
+        volume24h: formatCompactNumber(marketData.volume_24h)
       }, 'Market Stats');
 
       // 2. Continuous Learning: Only learn after reaching 5 trades threshold

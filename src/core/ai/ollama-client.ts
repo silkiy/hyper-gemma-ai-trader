@@ -26,6 +26,40 @@ export class OllamaClient {
     this.model = env.OLLAMA_MODEL;
   }
 
+  /**
+   * Internal helper for raw JSON generation without schema-specific validation.
+   */
+  private async generateRawJson(prompt: string): Promise<any> {
+    const request: OllamaRequest = {
+      model: this.model,
+      prompt: prompt,
+      stream: false,
+      options: {
+        temperature: 0.1,
+        top_k: 40,
+        top_p: 0.85,
+      },
+    };
+
+    try {
+      logger.info({ model: this.model }, "Sending request to Ollama");
+      const response = await axios.post<OllamaResponse>(
+        `${this.baseUrl}/api/generate`,
+        request,
+        { timeout: 300000 } // Increased to 5 minutes for larger models like gemma4
+      );
+      return extractJsonFromResponse(response.data.response);
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.error || error.message;
+      // Log cleanly without throwing the whole axios error object
+      logger.error(`Ollama raw generation failed: ${errorMsg}`);
+      throw new Error(`Ollama API Error: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Specifically for trading decisions (Legacy path or specific symbol analysis).
+   */
   async generateDecision(prompt: string): Promise<AIDecision> {
     if (env.MOCK_AI) {
       logger.info("MOCK_AI is enabled, returning mock decision");
@@ -45,52 +79,22 @@ export class OllamaClient {
       };
     }
 
-    const request: OllamaRequest = {
-      model: this.model,
-      prompt: prompt,
-      stream: false,
-      options: {
-        temperature: 0.1,
-        top_k: 40,
-        top_p: 0.85,
-      },
-    };
+    const rawJson = await this.generateRawJson(prompt);
+    return validateAIDecision(rawJson);
+  }
 
+  /**
+   * Public method for generic validated JSON generation (Cold Path / Commander).
+   */
+  async generateValidatedJson<T>(prompt: string, validator: (json: any) => T): Promise<T> {
+    const startTime = Date.now();
     try {
-      logger.info({ model: this.model }, "Sending request to Ollama");
-      const startTime = Date.now();
-
-      const response = await axios.post<OllamaResponse>(
-        `${this.baseUrl}/api/generate`,
-        request,
-        {
-          timeout: 150000,
-        },
-      );
-
+      const rawJson = await this.generateRawJson(prompt);
       const latency = Date.now() - startTime;
-      logger.info({ latency }, "Received response from Ollama");
-
-      const rawResponse = response.data.response;
-      let rawJson;
-      try {
-        rawJson = extractJsonFromResponse(rawResponse);
-      } catch (parseError) {
-        logger.error(
-          { rawResponse },
-          "Failed to extract JSON from Ollama response",
-        );
-        throw parseError;
-      }
-
-      const validatedDecision = validateAIDecision(rawJson);
-
-      return validatedDecision;
-    } catch (error) {
-      logger.error(
-        { error: error instanceof Error ? error.message : String(error) },
-        "Ollama client error",
-      );
+      logger.info({ latency }, "Received validated JSON from Ollama");
+      return validator(rawJson);
+    } catch (error: any) {
+      logger.error({ error: error.message }, "Ollama validated generation failed");
       throw error;
     }
   }

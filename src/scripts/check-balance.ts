@@ -1,21 +1,21 @@
 import 'dotenv/config';
-import { asterdexClient } from '../exchange/asterdex.client.js';
+import { bitgetClient } from '../exchange/bitget.client.js';
 import { logger } from '../utils/logger.js';
 
 async function checkBalance() {
-  logger.info('Checking Asterdex account balance...');
+  logger.info('Checking Bitget account balance...');
   try {
-    const balance = await asterdexClient.getAccountBalance();
-    console.log('\n--- ASTERDEX BALANCE INFO ---');
-    console.log(JSON.stringify(balance, null, 2));
+    const balances = await bitgetClient.getAccountBalance();
+    console.log('\n--- BITGET BALANCE INFO ---');
+    console.log(JSON.stringify(balances, null, 2));
     console.log('-----------------------------\n');
     
-    if (Array.isArray(balance)) {
-        const usdc = balance.find((b: any) => b.asset === 'USDC' || b.asset === 'USDT');
-        if (usdc) {
-            logger.info(`✅ Success! Available Balance: ${usdc.availableBalance || usdc.balance} ${usdc.asset}`);
+    if (Array.isArray(balances)) {
+        const usdt = balances.find((b: any) => b.marginCoin === 'USDT');
+        if (usdt) {
+            logger.info(`✅ Success! Available Balance: ${usdt.available} USDT`);
         } else {
-            logger.warn('Connected, but no USDC/USDT balance found.');
+            logger.warn('Connected, but no USDT margin account found.');
         }
     }
   } catch (error: any) {

@@ -16,7 +16,9 @@ export class RiskManager {
   }
 
   validateDecision(decision: AIDecision, account: AccountStatus, currentMode: SessionMode): AIDecision {
-    logger.info('Validating trade decision against risk rules (DYNAMIC LEVERAGE MODE)');
+    if (decision.final_summary !== 'PRE_SCAN_CHECK') {
+      logger.info('Validating trade decision against risk rules (DYNAMIC LEVERAGE MODE)');
+    }
 
     // 0. Check for existing positions (Dynamic Limit)
     const activePositions = account.open_positions || [];

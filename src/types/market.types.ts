@@ -9,6 +9,8 @@ export interface MarketData {
   atr: number;
   funding_rate: number;
   open_interest: number;
+  high_24h?: number;
+  low_24h?: number;
   timestamp: number;
   price_change_24h?: number;
 }

@@ -34,6 +34,7 @@ export class PromptBuilder {
     const marketContext = `
       MARKET (${marketData.pair}):
       Price: ${marketData.current_price}, 24h: ${marketData.price_change_24h}%
+      High 24h: ${marketData.high_24h}, Low 24h: ${marketData.low_24h}
       EMA20: ${marketData.ema20}, EMA50: ${marketData.ema50}, RSI: ${marketData.rsi}
       Trend: ${marketData.market_trend}, ATR: ${marketData.atr}
     `;

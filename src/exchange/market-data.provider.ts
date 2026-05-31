@@ -1,4 +1,5 @@
-import { asterdexClient } from './asterdex.client.js';
+import axios from 'axios';
+import { bitgetClient } from './bitget.client.js';
 import { indicatorEngine } from '../core/market/indicator-engine.js';
 import type { MarketData, AccountStatus } from '../types/market.types.js';
 import { logger } from '../utils/logger.js';
@@ -8,19 +9,16 @@ import { TradingStrategy } from '../types/enum.types.js';
 
 export class MarketDataProvider {
   async getMarketData(pair: string): Promise<MarketData> {
-    // Pro API uses BTCUSDT format
     const symbol = pair.replace('/', '').replace('-', '');
     
-    // Choose interval based on strategy
     const interval = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? '5m' : '1h';
     
-    logger.info({ symbol, interval, strategy: env.TRADING_STRATEGY }, 'Fetching real-time market data from ASTERDEX Pro API');
+    logger.info({ symbol, interval, strategy: env.TRADING_STRATEGY }, 'Fetching real-time market data from Bitget API');
 
     try {
-      const klines = await asterdexClient.getCandles(symbol, interval);
-      const ticker24h = await asterdexClient.getTicker24h(symbol);
+      const klines = await bitgetClient.getCandles(symbol, interval);
       
-      // Pro API (Binance format): [0:openTime, 1:open, 2:high, 3:low, 4:close, 5:volume...]
+      // Bitget Mix: [Time, Open, High, Low, Close, Volume, Amount]
       const closePrices = klines.map((c: any) => parseFloat(c[4]));
       const highPrices = klines.map((c: any) => parseFloat(c[2]));
       const lowPrices = klines.map((c: any) => parseFloat(c[3]));
@@ -35,58 +33,78 @@ export class MarketDataProvider {
       if (currentPrice > ema20 && ema20 > ema50) trend = 'BULLISH';
       else if (currentPrice < ema20 && ema20 < ema50) trend = 'BEARISH';
 
+      const allTickers = await bitgetClient.getAllTickers();
+      const ticker = allTickers.find((t: any) => t.symbol === symbol);
+      
+      // Find raw ticker for high/low data
+      const rawTickers = await axios.get(`${env.BITGET_BASE_URL}/api/v2/mix/market/tickers?productType=USDT-FUTURES`);
+      const rawTicker = rawTickers.data.data.find((t: any) => t.symbol === (symbol.endsWith('_UMCBL') ? symbol : `${symbol}_UMCBL`));
+
       return {
         pair,
         current_price: currentPrice,
         ema20,
         ema50,
         rsi,
-        volume_24h: parseFloat(ticker24h.volume || '0'),
+        volume_24h: ticker ? parseFloat(ticker.volume || '0') : parseFloat(klines[klines.length - 1][5] || '0'),
         market_trend: trend,
         atr,
         funding_rate: 0,
         open_interest: 0,
+        high_24h: rawTicker ? parseFloat(rawTicker.high24h || '0') : 0,
+        low_24h: rawTicker ? parseFloat(rawTicker.low24h || '0') : 0,
         timestamp: Date.now(),
-        price_change_24h: parseFloat(ticker24h.priceChangePercent || '0'),
+        price_change_24h: ticker ? parseFloat(ticker.priceChangePercent || '0') : 0, 
       };
     } catch (error) {
-      logger.error('Failed to provide real market data from ASTERDEX Pro API, falling back to mock');
-      return this.getMockMarketData(pair);
+      logger.error('Failed to provide real market data from Bitget API');
+      throw error;
     }
   }
 
   async getAccountStatus(): Promise<AccountStatus> {
     try {
-      // Use reliable V3 endpoints
-      const balances = await asterdexClient.getAccountBalance();
-      const positions = await asterdexClient.getPositions();
+      const accounts = await bitgetClient.getAccountBalance();
+      const positions = await bitgetClient.getPositions();
       
-      const usdtAsset = balances.find((a: any) => a.asset === 'USDT' || a.asset === 'USDC');
-      const walletBalance = usdtAsset ? parseFloat(usdtAsset.balance || usdtAsset.walletBalance || '0') : 0;
-      const availableBalance = usdtAsset ? parseFloat(usdtAsset.availableBalance || '0') : 0;
+      const usdtAccount = accounts.find((a: any) => a.marginCoin === 'USDT');
+      let walletBalance = usdtAccount ? parseFloat(usdtAccount.equity || '0') : 0;
+      let availableBalance = usdtAccount ? parseFloat(usdtAccount.available || '0') : 0;
+      
+      // VIRTUAL BALANCE FALLBACK (For PAPER mode with 0 actual funds)
+      if (env.TRADING_MODE === 'PAPER' && walletBalance <= 0) {
+        logger.info('PAPER MODE: Actual balance is $0. Providing virtual $1.00 for simulation.');
+        walletBalance = 1.0;
+        availableBalance = 1.0;
+      }
       
       const activePositions = Array.isArray(positions) 
-        ? positions.filter((p: any) => parseFloat(p.positionAmt || p.size || '0') !== 0)
+        ? positions.filter((p: any) => parseFloat(p.total || '0') !== 0)
         : [];
 
-      // Calculate aggregated metrics
       let totalUnrealizedPnL = 0;
       let totalMaintenanceMargin = 0;
       
       activePositions.forEach((p: any) => {
-        // AsterDex Pro V3 uses 'maintMargin' (lowercase 'm') or 'maintenanceMargin'
-        const mm = parseFloat(p.maintMargin || p.maintenanceMargin || '0');
-        totalUnrealizedPnL += parseFloat(p.unRealizedProfit || p.unrealizedProfit || '0');
-        totalMaintenanceMargin += mm;
+        totalUnrealizedPnL += parseFloat(p.unrealizedPL || '0');
+        totalMaintenanceMargin += parseFloat(p.margin || '0');
       });
 
-      const marginBalance = walletBalance + totalUnrealizedPnL;
-      const equity = marginBalance; // In Futures, Equity = Margin Balance
+      const marginBalance = walletBalance; 
+      const equity = walletBalance; 
       const marginRatio = marginBalance > 0 ? (totalMaintenanceMargin / marginBalance) * 100 : 0;
 
       return {
         current_equity: equity,
-        open_positions: activePositions,
+        open_positions: activePositions.map(p => ({
+          symbol: p.symbol.replace('_UMCBL', ''),
+          size: p.total,
+          entryPrice: p.averageOpenPrice,
+          markPrice: p.markPrice,
+          unRealizedProfit: p.unrealizedPL,
+          liquidationPrice: p.liquidationPrice,
+          leverage: p.leverage
+        })),
         daily_pnl: 0,
         loss_streak: 0,
         available_balance: availableBalance,
@@ -96,31 +114,9 @@ export class MarketDataProvider {
         total_wallet_balance: walletBalance
       };
     } catch (e) {
-      logger.error('CRITICAL: Failed to fetch real ASTERDEX account info. Blocking trade scan for safety.');
-      // Return a "Safety Block" state to prevent accidental trades
-      return {
-        current_equity: 0,
-        open_positions: [ { symbol: 'SAFETY_BLOCK', positionAmt: '1' } ], // Dummy position to trigger risk block
-        daily_pnl: 0,
-        loss_streak: 0,
-      };
+      logger.error('CRITICAL: Failed to fetch real Bitget account info.');
+      throw e;
     }
-  }
-
-  private getMockMarketData(pair: string): MarketData {
-    return {
-      pair,
-      current_price: 2500,
-      ema20: 2480,
-      ema50: 2450,
-      rsi: 55,
-      volume_24h: 1000000,
-      market_trend: 'BULLISH',
-      atr: 50,
-      funding_rate: 0.0001,
-      open_interest: 500000,
-      timestamp: Date.now(),
-    };
   }
 }
 

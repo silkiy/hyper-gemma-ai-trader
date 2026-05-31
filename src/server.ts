@@ -7,9 +7,11 @@ import { riskManager } from './core/risk/risk-manager.js';
 import { startMonitoringApi } from './api/monitoring-api.js';
 import { tradeService } from './services/trade.service.js';
 import { runMemoryConsolidation } from './jobs/memory-consolidation.job.js';
-import { asterdexClient } from './exchange/asterdex.client.js';
+import { bitgetClient } from './exchange/bitget.client.js';
 import { marketDataProvider } from './exchange/market-data.provider.js';
 import { sessionService } from './services/session.service.js';
+import { quantEngine } from './core/quant/quant-engine.js';
+import { strategyGovernor } from './core/ai/strategy-governor.js';
 import { env } from './config/env.js';
 import type { AccountStatus } from './types/market.types.js';
 import cron from 'node-cron';
@@ -37,17 +39,22 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
           const margin = leverage > 0 ? (Math.abs(size) * entryPrice) / leverage : 0;
           const roe = margin > 0 ? (pnl / margin) * 100 : 0;
 
+          const entryPriceFormatted = entryPrice < 0.01 ? entryPrice.toFixed(7) : (entryPrice < 1 ? entryPrice.toFixed(4) : entryPrice.toFixed(2));
+          const markPriceFormatted = markPrice < 0.01 ? markPrice.toFixed(7) : (markPrice < 1 ? markPrice.toFixed(4) : markPrice.toFixed(2));
+          const liqPriceFormatted = liqPrice < 0.01 ? liqPrice.toFixed(7) : (liqPrice < 1 ? liqPrice.toFixed(4) : liqPrice.toFixed(2));
+
           return {
             symbol: p.symbol,
             side: size > 0 ? 'LONG' : (size < 0 ? 'SHORT' : 'CLOSED'),
             size: size.toString(),
-            entryPrice: entryPrice.toFixed(entryPrice < 1 ? 4 : 2),
-            markPrice: markPrice.toFixed(markPrice < 1 ? 4 : 2),
-            liqPrice: liqPrice.toFixed(liqPrice < 1 ? 4 : 2),
+            entryPrice: entryPriceFormatted,
+            markPrice: markPriceFormatted,
+            liqPrice: liqPriceFormatted,
             margin: `$${margin.toFixed(4)}`,
             pnl: `$${pnl.toFixed(4)}`,
             roe: `${roe.toFixed(2)}%`
           };
+
         })
       }, '💰 PORTFOLIO SNAPSHOT');
     } else {
@@ -58,115 +65,122 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
   }
 }
 
-async function runMarketScan(mode: SessionMode) {
-  try {
-    // 1. Check Account & Risk Status
-    const accountStatus = await marketDataProvider.getAccountStatus();
-    const dummyDecision = { decision: TradeAction.SKIP, final_summary: 'PRE_SCAN_CHECK' } as any;
-    const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
-    
-    // 2. If Blocked (Max positions or safety risk), show portfolio and exit scan
-    if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked:')) {
-      logger.info({ reason: riskValidation.final_summary }, 'Scan skipped: Risk manager block active.');
-      await displayPortfolioSnapshot(accountStatus);
-      return false; // Indicating scan didn't complete due to block
-    }
+async function runHybridTradingLoop(mode: SessionMode) {
+  logger.info('🚀 HYBRID TACTICAL ENGINE STARTED');
+  
+  // 1. Initial Strategy Refresh
+  await strategyGovernor.refreshDirective();
 
-    // 3. Scan Exchange
-    logger.info(`--- ${env.TRADING_STRATEGY} MARKET SCAN START ---`);
-    
-    // Fetch all tickers to filter by activity
-    const allTickers = await asterdexClient.getAllTickers();
-    
-    // For Scalping, we only focus on High Velocity coins. 
-    // For Intraday/Swing, we scan everything but still sort by volume.
-    const hotPairs = env.TRADING_STRATEGY === TradingStrategy.SCALPING
-      ? allTickers
-          .filter(t => {
-            const change = Math.abs(parseFloat(t.priceChangePercent || '0'));
-            const volume = parseFloat(t.volume || '0');
-            return change > 2.0 || volume > 1000000;
-          })
-          .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
-          .map(t => t.symbol)
-      : allTickers
-          .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
-          .map(t => t.symbol);
-
-    logger.info({ totalToScan: hotPairs.length }, `Scanning ${env.TRADING_STRATEGY} opportunities...`);
-    
-    for (const pair of hotPairs) {
-      try {
-        const decision = await decisionEngine.evaluateTrade(pair, mode);
-        
-        if (decision.decision !== 'SKIP' && decision.decision !== 'WAIT') {
-          logger.info({ pair, decision: decision.decision }, 'Opportunity found! Executing...');
-          const execution = await tradeService.handleTradeDecision(decision, pair);
-
-          if (execution) {
-            logger.info(`--- ${env.TRADING_STRATEGY} MARKET SCAN END (TRADE EXECUTED) ---`);
-            return true; 
-          }
-        }
-        
-        // Micro-delay between pairs
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (error) {
-        logger.error({ pair, error }, 'Evaluation failed for pair');
-      }
-    }
-    
-    logger.info(`--- ${env.TRADING_STRATEGY} MARKET SCAN END ---`);
-    return true;
-
-  } catch (error) {
-    logger.error({ error }, 'Market scan error');
-    return false;
-  }
-}
-
-async function startInfiniteLoop(mode: SessionMode) {
-  logger.info('🚀 TRADING ENGINE: INFINITE SCAN MODE ENABLED (SCALPING)');
+  // 2. High-Speed Loop with Tactical AI Confirmation
   while (true) {
-    await runMarketScan(mode);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      const accountStatus = await marketDataProvider.getAccountStatus();
+      
+      // Check for safety blocks (Max positions or Critical Safety)
+      const dummyDecision = { decision: TradeAction.SKIP, final_summary: 'PRE_SCAN_CHECK' } as any;
+      const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
+      
+      if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked: Safety')) {
+        await displayPortfolioSnapshot(accountStatus);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        continue;
+      }
+
+      const allTickers = await bitgetClient.getAllTickers();
+      
+      const majorPairs = [
+        'BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'BNBUSDT', 'XRPUSDT', 
+        'ZECUSDT', 'XLMUSDT', 'SUIUSDT', 'TONUSDT', 'BCHUSDT',
+        'LINKUSDT', 'ADAUSDT', 'AVAXUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT',
+        'HYPEUSDT'
+      ];
+
+      let hotPairs: string[] = [];
+
+      if (env.SCAN_MODE === 'VIP') {
+        hotPairs = allTickers
+          .filter((t: any) => majorPairs.includes(t.symbol))
+          .map((t: any) => t.symbol);
+      } else if (env.SCAN_MODE === 'ALL') {
+        hotPairs = allTickers.map((t: any) => t.symbol);
+      } else {
+        // Default: HOT50 (Top 50 by volume)
+        hotPairs = allTickers
+          .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+          .slice(0, 50)
+          .map((t: any) => t.symbol);
+      }
+
+      const interval = env.TRADING_STRATEGY === TradingStrategy.INTRADAY ? '15m' : '5m';
+
+      for (const pair of hotPairs) {
+        try {
+          const prices = await bitgetClient.getPriceHistory(pair, interval, 20);
+          
+          // 1. MATH SENSOR (Instant)
+          const { decision: quantDecision, zScore, threshold } = await quantEngine.evaluateHighSpeed(pair, prices);
+          
+          // Real-time Pulse Log (Now shows threshold for transparency)
+          const thresholdSymbol = zScore < 0 ? `-${threshold.toFixed(2)}` : `+${threshold.toFixed(2)}`;
+          process.stdout.write(`\r[QUANT PULSE] ${pair} | Z: ${zScore.toFixed(2)} (Target: ${thresholdSymbol})      `);
+
+          if (quantDecision) {
+            console.log(''); // Move to new line
+            logger.info({ pair, zScore: zScore.toFixed(2), threshold: threshold.toFixed(2) }, '🎯 MATH SENSOR HIT: Target reached!');
+            
+            // 2. AI SNIPER (Gemma confirms the math signal)
+            const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode);
+            
+            if (tacticalDecision.decision !== 'SKIP' && tacticalDecision.decision !== 'WAIT') {
+              logger.info({ pair }, '⚡ TACTICAL STRIKE: Gemma confirmed! Executing trade...');
+              const execution = await tradeService.handleTradeDecision(tacticalDecision, pair);
+              if (execution) {
+                console.log(''); // Clear pulse line
+                break; 
+              }
+            } else {
+              logger.info({ pair, reason: tacticalDecision.final_summary }, '❌ TACTICAL VETO: Gemma rejected the math signal.');
+            }
+          }
+        } catch (e: any) {
+          // Log the error softly so we know if a coin is failing silently
+          // process.stdout.write(`\r[QUANT PULSE] Error on ${pair}: ${e.message}      `);
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      process.stdout.write(`\r[QUANT PULSE] Cycle complete. Waiting for next cycle...      `);
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+    } catch (error) {
+      logger.error({ error }, 'Tactical loop error');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
   }
-}
-
-async function startScheduledTasks(mode: SessionMode) {
-  const strategy = env.TRADING_STRATEGY;
-  const interval = strategy === TradingStrategy.INTRADAY ? '*/15 * * * *' : '0 * * * *'; // 15m for Intraday, 1h for Swing
-  
-  logger.info({ strategy, schedule: strategy === TradingStrategy.INTRADAY ? 'Every 15 mins' : 'Every 1 hour' }, '🚀 TRADING ENGINE: SCHEDULED MODE ENABLED');
-  
-  // Initial scan on startup
-  await runMarketScan(mode);
-
-  cron.schedule(interval, async () => {
-    await runMarketScan(mode);
-  });
 }
 
 async function bootstrap() {
-  logger.info('Starting Hyper-Gemma AI Trader Service (FULL AUTONOMY MODE)');
+  logger.info('Starting Hyper-Gemma AI Trader (HYBRID TACTICAL MODE)');
   await connectMongo();
   await startMonitoringApi();
   const currentMode = SessionMode.NORMAL;
   await sessionService.startNewSession(currentMode);
 
-  // Strategy-based engine selection
-  if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) {
-    startInfiniteLoop(currentMode).catch(err => logger.fatal({ err }, 'Infinite loop fatal error'));
-  } else {
-    startScheduledTasks(currentMode).catch(err => logger.error({ err }, 'Scheduled engine error'));
-  }
+  // Path 1: Strategy Governor (Every 1 hour Gemma wakes up)
+  cron.schedule('0 * * * *', async () => {
+    await strategyGovernor.refreshDirective();
+  });
 
-  // Common background jobs
+  // Path 2: Tactical Execution Engine
+  runHybridTradingLoop(currentMode).catch(err => logger.fatal({ err }, 'Fatal Engine Error'));
+
+  // Path 3: Background Jobs
   cron.schedule('0 0 * * *', async () => {
     await runMemoryConsolidation();
   });
 
-  logger.info({ strategy: env.TRADING_STRATEGY }, 'System initialized and ready.');
+  logger.info('System fully operational in Hybrid Mode.');
 }
 
 bootstrap().catch((err) => {

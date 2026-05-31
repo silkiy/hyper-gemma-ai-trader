@@ -4,10 +4,19 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.string().default('info'),
   MONGODB_URI: z.string().url(),
-  ASTERDEX_USER_ADDRESS: z.string().startsWith('0x'),
-  ASTERDEX_API_KEY: z.string(),
-  ASTERDEX_SECRET: z.string(),
+  
+  // Asterdex API Config (Optional after migration)
+  ASTERDEX_USER_ADDRESS: z.string().startsWith('0x').optional(),
+  ASTERDEX_API_KEY: z.string().optional(),
+  ASTERDEX_SECRET: z.string().optional(),
   ASTERDEX_BASE_URL: z.string().url().default('https://fapi.asterdex.com'),
+
+  // Bitget API Config
+  BITGET_API_KEY: z.string().optional(),
+  BITGET_SECRET_KEY: z.string().optional(),
+  BITGET_PASSPHRASE: z.string().optional(),
+  BITGET_BASE_URL: z.string().url().default('https://api.bitget.com'),
+
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
   OLLAMA_MODEL: z.string().default('gemma:7b-instruct'),
   MOCK_AI: z.string().default('false').transform(v => v === 'true'),
@@ -17,6 +26,8 @@ const envSchema = z.object({
   PORT: z.string().default('3000').transform(Number),
   MAX_POSITIONS: z.string().default('2').transform(Number),
   TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
+  SCAN_MODE: z.enum(['VIP', 'HOT50', 'ALL']).default('VIP'),
+  TRADING_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
 });
 
 export const env = envSchema.parse(process.env);
