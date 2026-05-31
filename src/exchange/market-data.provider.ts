@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { bitgetClient } from './bitget.client.js';
 import { indicatorEngine } from '../core/market/indicator-engine.js';
+import { tradeRepository } from '../database/repositories/trade.repository.js';
+import { sessionService } from '../services/session.service.js';
 import type { MarketData, AccountStatus } from '../types/market.types.js';
 import { logger } from '../utils/logger.js';
 
@@ -90,21 +92,51 @@ export class MarketDataProvider {
         totalMaintenanceMargin += parseFloat(p.margin || '0');
       });
 
+      let mappedPositions = activePositions.map(p => ({
+        symbol: p.symbol.replace('_UMCBL', ''),
+        size: p.total,
+        entryPrice: p.averageOpenPrice,
+        markPrice: p.markPrice,
+        unRealizedProfit: p.unrealizedPL,
+        liquidationPrice: p.liquidationPrice,
+        leverage: p.leverage
+      }));
+
+      // FIX 2: Isolation for PAPER MODE
+      if (env.TRADING_MODE === 'PAPER') {
+        // Reset: Ignore real positions to keep simulation isolated
+        mappedPositions = []; 
+        totalMaintenanceMargin = 0;
+
+        const currentSessionId = sessionService.getCurrentSessionId();
+        const recentTrades = await tradeRepository.findRecent(10);
+        // Only count mock positions from the CURRENT session
+        const sessionTrades = recentTrades.filter(t => t.session_id.toString() === currentSessionId);
+        
+        for (const t of sessionTrades) {
+          if (!mappedPositions.find(p => p.symbol === t.pair)) {
+            mappedPositions.push({
+              symbol: t.pair,
+              size: 'MOCK',
+              entryPrice: t.entry_price?.toString() || '0',
+              markPrice: t.entry_price?.toString() || '0',
+              unRealizedProfit: '0',
+              liquidationPrice: '0',
+              leverage: t.leverage?.toString() || '1'
+            });
+            // Assume 20% margin usage for each mock position for calculation
+            totalMaintenanceMargin += 0.10; 
+          }
+        }
+      }
+
       const marginBalance = walletBalance; 
       const equity = walletBalance; 
       const marginRatio = marginBalance > 0 ? (totalMaintenanceMargin / marginBalance) * 100 : 0;
 
       return {
         current_equity: equity,
-        open_positions: activePositions.map(p => ({
-          symbol: p.symbol.replace('_UMCBL', ''),
-          size: p.total,
-          entryPrice: p.averageOpenPrice,
-          markPrice: p.markPrice,
-          unRealizedProfit: p.unrealizedPL,
-          liquidationPrice: p.liquidationPrice,
-          leverage: p.leverage
-        })),
+        open_positions: mappedPositions,
         daily_pnl: 0,
         loss_streak: 0,
         available_balance: availableBalance,
