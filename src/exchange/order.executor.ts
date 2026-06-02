@@ -25,34 +25,46 @@ export class OrderExecutor {
       const precision = symbolInfo.quantityPrecision;
       const pricePrecision = symbolInfo.pricePrecision;
       const maxExchangeLeverage = symbolInfo.maxLeverage;
+      const minBitgetNotional = symbolInfo.minTradeUSDT;
 
-      logger.info({ symbol, maxExchangeLeverage, pricePrecision }, 'Bitget V2 Symbol Data');
-
-      // 3. Calculate Quantity to meet MIN_NOTIONAL ($5)
-      const rawQuantity = this.MIN_NOTIONAL / price;
-      const multiplier = Math.pow(10, precision);
-      const quantityStr = (Math.ceil(rawQuantity * multiplier) / multiplier).toFixed(precision);
-      
-      // 4. AUTO-LEVERAGE OPTIMIZATION (Rata Kanan)
+      // 3. AUTO-LEVERAGE OPTIMIZATION & NOTIONAL SIZING
       const available = accountStatus.available_balance || 0;
-      const minNotional = this.MIN_NOTIONAL;
       
-      // Calculate minimum leverage needed with 10% buffer
-      const minNeededLeverage = Math.ceil(minNotional / (available * 0.9)); 
+      // TARGET_NOTIONAL = max(MIN_BITGET_NOTIONAL, available_balance * MAX_TRADE_ALLOCATION)
+      // This strict formula guarantees we never risk more than the allocated percentage of our balance
+      // unless the exchange minimum forces us to (which we then check affordability for).
+      const maxTradeAllocation = env.MAX_TRADE_ALLOCATION; 
+      const targetNotional = Math.max(minBitgetNotional, available * maxTradeAllocation);
+
+      // Calculate minimum leverage needed to afford this targetNotional
+      const minNeededLeverage = Math.ceil(targetNotional / (available * 0.98)); 
       
-      // Use maximum possible leverage (capped by exchange)
+      // Use maximum possible leverage (capped by exchange) to minimize margin blocked
       let finalLeverage = Math.max(decision.leverage_suggestion, minNeededLeverage);
       if (finalLeverage > maxExchangeLeverage) finalLeverage = maxExchangeLeverage;
 
       // Final Affordability Check
-      const requiredMargin = minNotional / finalLeverage;
+      const marginUsed = targetNotional / finalLeverage;
       const safeAvailable = available * 0.98; // 2% for safety/fees
 
-      if (requiredMargin > safeAvailable) {
-        const errorMsg = `CANNOT AFFORD ${symbol}: Needs $${requiredMargin.toFixed(4)} margin, have $${available.toFixed(4)}. (Max Lev: ${maxExchangeLeverage}x)`;
+      if (marginUsed > safeAvailable) {
+        const errorMsg = `CANNOT AFFORD ${symbol}: Needs $${marginUsed.toFixed(4)} margin (Notional: $${targetNotional.toFixed(2)}), have $${available.toFixed(4)}. (Max Lev: ${maxExchangeLeverage}x)`;
         logger.error(errorMsg);
         throw new Error(errorMsg);
       }
+
+      // 4. Calculate Quantity based on TARGET_NOTIONAL
+      const rawQuantity = targetNotional / price;
+      const multiplier = Math.pow(10, precision);
+      const quantityStr = (Math.ceil(rawQuantity * multiplier) / multiplier).toFixed(precision);
+
+      logger.info({ 
+        symbol, 
+        targetNotional: `$${targetNotional.toFixed(2)}`,
+        marginUsed: `$${marginUsed.toFixed(4)}`,
+        finalLeverage: `${finalLeverage}x`,
+        qty: quantityStr
+      }, 'Order Sizing Calculated');
 
       // Set Leverage first
       await bitgetClient.setLeverage(symbol, finalLeverage);
