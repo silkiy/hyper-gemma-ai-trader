@@ -208,7 +208,7 @@ Mesin trading matematika murni yang bekerja dalam **milidetik** tanpa memanggil 
   - **MODE A: Trend Following** (Hurst ≥ threshold) → Entry pada Kalman Bullish + Price above VWAP (momentum sehat)
   - **MODE B: Mean Reversion** (Hurst < threshold) → Entry pada Z-Score extreme + Micro-Bounce + Value area (dekat/di bawah VWAP)
 - **VWAP Confirmation** — Daily VWAP (reset 00:00 UTC) sebagai value/premium area detector
-- **Kalman Trend Filter** — Anti-noise: konfirmasi arah trend via Kalman Filter yang dikontrol oleh `kalman_aggressiveness` dari Directive
+- **Kalman Trend Filter** — Anti-noise: **Adaptive Gain** Kalman Filter yang menyesuaikan noise berdasarkan volatilitas lokal, dikontrol oleh `kalman_aggressiveness` dari Directive
 - **Directive-Driven** — Menggunakan `z_score_threshold`, `bias`, dan `kalman_aggressiveness` dari Battle Directive
 - **Strategy-Adaptive Hurst Threshold** — SCALPING: `>= 0.50`, INTRADAY/SWING: `>= 0.60` (inclusive `>=` — konsisten di QuantEngine, DecisionEngine, dan Server)
 - **NEUTRAL Safety** — Jika bias NEUTRAL, menggunakan threshold ketat 2.2 untuk kedua arah
@@ -221,11 +221,11 @@ Utilitas matematika yang digunakan oleh QuantEngine:
 | Fungsi | Deskripsi |
 |--------|-----------|
 | `calculateZScore(prices)` | Mengukur deviasi standar harga terakhir dari mean (short window) |
-| `hurstExponent(prices)` | **[NEW]** Rescaled Range (R/S) analysis untuk deteksi regime: H < 0.45 = mean-reverting, H > 0.55 = trending |
-| `calculateVWAP(ohlcv)` | **[NEW]** Volume Weighted Average Price: Σ(TP × Vol) / Σ(Vol) |
-| `vwapDeviation(price, vwap)` | **[NEW]** Deviasi harga terhadap VWAP dalam persentase |
-| `applyKalmanFilter(prices, noise)` | Filter noise harga tanpa lag moving average |
-| `calculateVelocity(prices)` | Linear regression untuk menghitung kecepatan perubahan harga |
+| `hurstExponent(prices)` | **Multi-Scale R/S Analysis** — Menggunakan sub-window scales (8, 16, 32, 64 candles), menghitung R/S per chunk, lalu OLS linear regression pada log-log plot untuk mendapatkan slope H |
+| `calculateVWAP(ohlcv)` | Volume Weighted Average Price: Σ(TP × Vol) / Σ(Vol) |
+| `vwapDeviation(price, vwap)` | Deviasi harga terhadap VWAP dalam persentase |
+| `applyKalmanFilter(prices, noise)` | **Adaptive Gain Kalman** — Menghitung local volatility (std dev 10 candle terakhir), lalu menyesuaikan `measureNoise` secara dinamis: volatilitas tinggi → filter lebih konservatif. Fallback ke scalar Kalman untuk sample < 10 |
+| `calculateVelocity(prices)` | **Weighted Least Squares (WLS)** — Linear regression dengan exponential decay weights (decay=0.1): candle terbaru mendapat bobot terbesar |
 
 **OHLCV Interface:**
 ```typescript
@@ -376,7 +376,7 @@ Client lengkap untuk Bitget Futures API V2 dengan autentikasi HMAC-SHA256:
 | **Get All Tickers** | Mengambil semua 24h ticker sekaligus (normalized format) |
 | **Get Account Balance** | Mengambil saldo akun (USDT-FUTURES) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
-| **Get Symbol Info** | Mengambil `quantityPrecision`, `pricePrecision`, dan `maxLeverage` per simbol |
+| **Get Symbol Info** | Mengambil `quantityPrecision`, `pricePrecision`, `maxLeverage`, dan `minTradeUSDT` per simbol |
 | **Place Order** | Membuat market atau limit order |
 | **Place Plan Order** | Membuat trigger-based order untuk SL/TP (plan orders) |
 | **Set Leverage** | Mengatur leverage per simbol (PAPER mode: simulated) |
@@ -421,13 +421,17 @@ Aggregator data market yang menggabungkan raw data dari Bitget dengan indikator 
 
 Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 
-- **Min Notional** — Memastikan nilai order minimal $5.1 (memenuhi minimum exchange $5)
-- **Dynamic Quantity** — Menghitung kuantitas berdasarkan harga terkini dan presisi simbol
+- **Dynamic Notional Sizing** — Ukuran order ditentukan oleh formula:
+  - `TARGET_NOTIONAL = max(minBitgetNotional, available_balance × MAX_TRADE_ALLOCATION)`
+  - `minBitgetNotional` diambil langsung dari kontrak exchange per simbol (`symbolInfo.minTradeUSDT`)
+  - `MAX_TRADE_ALLOCATION` dikonfigurasi via environment (default: 20% dari balance)
+- **Dynamic Quantity** — Menghitung kuantitas: `ceil(TARGET_NOTIONAL / price)` dengan presisi simbol
 - **Exchange-Aware Leverage** — Mengambil `maxLeverage` langsung dari kontrak Bitget per simbol
 - **Auto-Leverage Optimization** — Menaikkan leverage otomatis jika saran AI terlalu rendah:
-  - `ceil(minNotional / (available * 0.9))` — 10% buffer
+  - `ceil(targetNotional / (available * 0.98))` — 2% buffer
   - Capped by `maxExchangeLeverage` per simbol
-- **2% Safety Buffer** — Final affordability check dengan 2% buffer untuk fees
+- **2% Safety Buffer** — Final affordability check: `marginUsed = targetNotional / finalLeverage` vs `available * 0.98`
+- **Detailed Sizing Log** — Mencatat `targetNotional`, `marginUsed`, `finalLeverage`, dan `qty` per order
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
 - **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
 - **Strategy-Dynamic SL/TP via Plan Orders** — Setelah order utama tereksekusi, otomatis memasang SL/TP menggunakan Bitget Plan Orders:
@@ -722,6 +726,7 @@ npm run dev
 | `BITGET_BASE_URL` | Base URL Bitget API | `https://api.bitget.com` |
 | `TRADING_MODE` | Mode trading: `PAPER` (simulasi) atau `LIVE` | `PAPER` |
 | `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `2` |
+| `MAX_TRADE_ALLOCATION` | Persentase balance per trade (0.0-1.0) | `0.20` (20%) |
 | `TRADING_STRATEGY` | Strategi trading: `SCALPING` / `INTRADAY` / `SWING` | `INTRADAY` |
 | `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT50` / `ALL` | `VIP` |
 | `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
@@ -746,9 +751,14 @@ npm run dev
 - [x] AI Decision Engine dengan Gemma 4
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
 - [x] **Auto-Leverage Optimization** (auto-increase + exchange-aware cap)
+- [x] **Dynamic Notional Sizing** (MAX_TRADE_ALLOCATION + minTradeUSDT dari exchange)
 - [x] **Strategy-Dynamic SL/TP** (Bitget Plan Orders, mark_price trigger)
 - [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
 - [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
+- [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
+- [x] **Adaptive Kalman Filter** (volatility-adjusted measureNoise dengan local std dev)
+- [x] **Multi-Scale Hurst Exponent** (R/S analysis pada 4 skala: 8, 16, 32, 64 candles + OLS regression)
+- [x] **WLS Price Velocity** (Weighted Least Squares dengan exponential decay weights)
 - [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
 - [x] **Regime Context Prompt Injection** (Hurst + regime + trioDirection disuntikkan ke prompt Gemma)
 - [x] **Validated JSON for Both AI Schemas** (AIDecision + BattleDirective via Zod)
