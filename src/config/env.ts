@@ -4,12 +4,6 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.string().default('info'),
   MONGODB_URI: z.string().url(),
-  
-  // Asterdex API Config (Optional after migration)
-  ASTERDEX_USER_ADDRESS: z.string().startsWith('0x').optional(),
-  ASTERDEX_API_KEY: z.string().optional(),
-  ASTERDEX_SECRET: z.string().optional(),
-  ASTERDEX_BASE_URL: z.string().url().default('https://fapi.asterdex.com'),
 
   // Bitget API Config
   BITGET_API_KEY: z.string().optional(),
