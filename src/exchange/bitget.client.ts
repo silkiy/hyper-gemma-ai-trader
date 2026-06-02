@@ -198,7 +198,7 @@ export class BitgetClient {
     }
   }
 
-  async getSymbolInfo(symbol: string): Promise<{ quantityPrecision: number; pricePrecision: number; maxLeverage: number }> {
+  async getSymbolInfo(symbol: string): Promise<{ quantityPrecision: number; pricePrecision: number; maxLeverage: number, minTradeUSDT: number }> {
     const formattedSymbol = this.formatSymbol(symbol);
     const requestPath = `/api/v2/mix/market/contracts?symbol=${formattedSymbol}&productType=USDT-FUTURES`;
     try {
@@ -208,12 +208,13 @@ export class BitgetClient {
         return {
           quantityPrecision: parseInt(symbolInfo.volumePlace) || 0,
           pricePrecision: parseInt(symbolInfo.pricePlace) || 8,
-          maxLeverage: parseInt(symbolInfo.maxLever) || 20
+          maxLeverage: parseInt(symbolInfo.maxLever) || 20,
+          minTradeUSDT: parseFloat(symbolInfo.minTradeUSDT || '5.0')
         };
       }
-      return { quantityPrecision: 0, pricePrecision: 8, maxLeverage: 10 };
+      return { quantityPrecision: 0, pricePrecision: 8, maxLeverage: 10, minTradeUSDT: 5.0 };
     } catch (e) {
-      return { quantityPrecision: 0, pricePrecision: 8, maxLeverage: 10 };
+      return { quantityPrecision: 0, pricePrecision: 8, maxLeverage: 10, minTradeUSDT: 5.0 };
     }
   }
 
