@@ -731,8 +731,6 @@ npm run dev
 | `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT50` / `ALL` | `VIP` |
 | `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
 
-> **Catatan:** `env.ts` masih memiliki field legacy AsterDex (`ASTERDEX_USER_ADDRESS`, `ASTERDEX_API_KEY`, `ASTERDEX_SECRET`, `ASTERDEX_BASE_URL`) yang bersifat opsional dan tidak digunakan di runtime. Bisa dihapus saat cleanup.
-
 ---
 
 ## 🔮 Roadmap & Scalability
@@ -759,7 +757,6 @@ npm run dev
 - [x] **Adaptive Kalman Filter** (volatility-adjusted measureNoise dengan local std dev)
 - [x] **Multi-Scale Hurst Exponent** (R/S analysis pada 4 skala: 8, 16, 32, 64 candles + OLS regression)
 - [x] **WLS Price Velocity** (Weighted Least Squares dengan exponential decay weights)
-- [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
 - [x] **Regime Context Prompt Injection** (Hurst + regime + trioDirection disuntikkan ke prompt Gemma)
 - [x] **Validated JSON for Both AI Schemas** (AIDecision + BattleDirective via Zod)
 - [x] Indikator teknikal (EMA, RSI, ATR) dengan null-safety
@@ -780,6 +777,7 @@ npm run dev
 - [x] **VWAP Value/Premium Area Detection** (daily reset 00:00 UTC)
 
 ### 🔜 Rencana Pengembangan
+- [ ] **Volatility Spike Detector** — Filter event-driven moves (change24h > 10% + volume spike > 3x average) menggunakan data MarketData yang sudah ada. Mencegah entry saat pump/dump ekstrem yang tidak diprediksi oleh Trio.
 - [ ] Multi-agent trading
 - [ ] Vector memory embeddings
 - [ ] RAG-based market memory
