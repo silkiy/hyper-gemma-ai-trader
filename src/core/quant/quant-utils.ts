@@ -25,19 +25,42 @@ export class QuantUtils {
   }
 
   /**
-   * Kalman Filter reduces noise from price data.
-   * Identifies the 'True Trend' without the lag of moving averages.
+   * Kalman Filter with Adaptive Gain.
+   * Dynamically adjusts measureNoise based on local volatility.
+   * Volatility high -> increase measureNoise -> filter becomes more conservative.
    */
   static applyKalmanFilter(prices: number[], processNoise: number = 0.01, measureNoise: number = 0.1): number {
-    if (prices.length === 0) return 0;
+    const n = prices.length;
+    if (n === 0) return 0;
+    if (n < 10) {
+      // Fallback to scalar Kalman for small samples
+      let estimate = prices[0]!;
+      let errorEstimate = 1.0;
+      for (let i = 1; i < n; i++) {
+        errorEstimate += processNoise;
+        const gain = errorEstimate / (errorEstimate + measureNoise);
+        estimate += gain * (prices[i]! - estimate);
+        errorEstimate = (1 - gain) * errorEstimate;
+      }
+      return estimate;
+    }
+
+    // 1. Calculate local volatility (std dev of last 10)
+    const window = prices.slice(-10);
+    const localSd = standardDeviation(window);
+    const localMean = mean(window);
     
+    // 2. Adjust measureNoise: more noise in high volatility
+    const volatilityFactor = localMean === 0 ? 0 : localSd / localMean;
+    const adaptiveMeasureNoise = measureNoise * (1 + volatilityFactor * 50);
+
     let estimate = prices[0]!;
     let errorEstimate = 1.0;
 
-    for (let i = 1; i < prices.length; i++) {
-      errorEstimate = errorEstimate + processNoise;
-      const kalmanGain = errorEstimate / (errorEstimate + measureNoise);
-      estimate = estimate + kalmanGain * (prices[i]! - estimate);
+    for (let i = 1; i < n; i++) {
+      errorEstimate += processNoise;
+      const kalmanGain = errorEstimate / (errorEstimate + adaptiveMeasureNoise);
+      estimate += kalmanGain * (prices[i]! - estimate);
       errorEstimate = (1 - kalmanGain) * errorEstimate;
     }
 
@@ -45,43 +68,68 @@ export class QuantUtils {
   }
 
   /**
-   * Hurst Exponent (H) determines the market regime.
-   * H < 0.45: Mean-reverting (Anti-persistent)
-   * H > 0.55: Trending (Persistent)
-   * n = window size
+   * Hurst Exponent (H) via Multi-Scale Rescaled Range (R/S) Analysis.
+   * H < 0.45: Anti-persistent (Ranging)
+   * H > 0.55: Persistent (Trending)
    */
   static hurstExponent(prices: number[]): number {
     const n = prices.length;
-    if (n < 50) return 0.5; // Neutral default for small samples
+    if (n < 50) return 0.5;
 
-    // 1. Log returns
+    // 1. Calculate Log Returns: log(P_t / P_t-1)
     const returns: number[] = [];
     for (let i = 1; i < n; i++) {
-      if (prices[i-1] === 0 || prices[i-1] === undefined || prices[i] === undefined) continue;
+      if (prices[i-1]! <= 0) continue;
       returns.push(Math.log(prices[i]! / prices[i-1]!));
     }
+    if (returns.length < 40) return 0.5;
 
-    if (returns.length < 2) return 0.5;
+    // 2. Define sub-window scales (Powers of 2)
+    const scales = [8, 16, 32, 64].filter(s => s <= returns.length);
+    const logRS: number[] = [];
+    const logScales: number[] = [];
 
-    // 2. Simplified Rescaled Range (R/S) for Hot Path efficiency
-    const avg = mean(returns);
-    const std = standardDeviation(returns);
-    if (std === 0) return 0.5;
+    for (const scale of scales) {
+      const numChunks = Math.floor(returns.length / scale);
+      const chunkRS: number[] = [];
 
-    let cumSum = 0;
-    const deviations = returns.map(r => {
-      cumSum += (r - avg);
-      return cumSum;
-    });
+      for (let i = 0; i < numChunks; i++) {
+        const chunk = returns.slice(i * scale, (i + 1) * scale);
+        const chunkMean = mean(chunk);
+        const chunkSd = standardDeviation(chunk);
+        if (chunkSd === 0) continue;
 
-    const range = Math.max(...deviations) - Math.min(...deviations);
-    const rs = range / std;
+        let cumSum = 0;
+        const deviations = chunk.map(v => {
+          cumSum += (v - chunkMean);
+          return cumSum;
+        });
 
-    // H = log(RS) / log(n)
-    const hurst = Math.log(rs) / Math.log(returns.length);
+        const range = Math.max(...deviations) - Math.min(...deviations);
+        chunkRS.push(range / chunkSd);
+      }
+
+      if (chunkRS.length > 0) {
+        logRS.push(Math.log(mean(chunkRS)));
+        logScales.push(Math.log(scale));
+      }
+    }
+
+    // 3. Linear Regression on Log-Log plot: log(R/S) = H*log(n) + C
+    if (logRS.length < 2) return 0.5;
     
-    // Clamp result for safety
-    return Math.max(0, Math.min(1, hurst));
+    // Simple OLS for the slope H
+    const nReg = logRS.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    for (let i = 0; i < nReg; i++) {
+      sumX += logScales[i]!;
+      sumY += logRS[i]!;
+      sumXY += logScales[i]! * logRS[i]!;
+      sumXX += logScales[i]! * logScales[i]!;
+    }
+
+    const slope = (nReg * sumXY - sumX * sumY) / (nReg * sumXX - sumX * sumX);
+    return Math.max(0, Math.min(1, isNaN(slope) ? 0.5 : slope));
   }
 
   /**
@@ -112,21 +160,34 @@ export class QuantUtils {
   }
 
   /**
-   * Linear regression slope to find price velocity
+   * Price Velocity via Weighted Least Squares (WLS) Regression.
+   * Applies exponential decay weights: more importance to recent candles.
+   * decay = 0.1 (default)
    */
   static calculateVelocity(prices: number[]): number {
     const n = prices.length;
     if (n < 2) return 0;
-    
-    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+
+    const decay = 0.1;
+    let sumW = 0, sumWX = 0, sumWY = 0, sumWXX = 0, sumWXY = 0;
+
     for (let i = 0; i < n; i++) {
-      sumX += i;
-      sumY += prices[i]!;
-      sumXY += i * prices[i]!;
-      sumXX += i * i;
+      // Exponential weight: newest candle has highest weight
+      const weight = Math.exp(decay * i);
+      const x = i;
+      const y = prices[i]!;
+
+      sumW += weight;
+      sumWX += weight * x;
+      sumWY += weight * y;
+      sumWXX += weight * x * x;
+      sumWXY += weight * x * y;
     }
+
+    // WLS Slope Formula: (SumW * SumWXY - SumWX * SumWY) / (SumW * SumWXX - SumWX^2)
+    const denom = (sumW * sumWXX - sumWX * sumWX);
+    if (denom === 0) return 0;
     
-    const denom = (n * sumXX - sumX * sumX);
-    return denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+    return (sumW * sumWXY - sumWX * sumWY) / denom;
   }
 }
