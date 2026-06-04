@@ -8,6 +8,32 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue)](#)
 [![Node.js](https://img.shields.io/badge/Node.js-LTS-green)](#)
 
+## 📈 Live Trading Results
+
+> **Total ROI: +4,175.89%** (Desember 2025 — Juni 2026) | **30-Day ROI: +619.16%**
+
+<p align="center">
+  <img src="images/roi-total-4175.jpeg" width="280" alt="Total ROI +4175.89%">
+  <img src="images/roi-30d-619.jpeg" width="280" alt="30-Day ROI +619.16%">
+</p>
+
+### Contoh Trade Profit
+
+<p align="center">
+  <img src="images/trade-ygg-84pct.jpeg" width="200" alt="YGG +84.78%">
+  <img src="images/trade-xpin-61pct.jpeg" width="200" alt="XPIN +61.34%">
+  <img src="images/trade-ctr-49pct.jpeg" width="200" alt="CTR +49.75%">
+  <img src="images/trade-rune-31pct.jpeg" width="200" alt="RUNE +31.03%">
+</p>
+<p align="center">
+  <img src="images/trade-vtho-24pct.jpeg" width="200" alt="VTHO +24.48%">
+  <img src="images/trade-jst-21pct.jpeg" width="200" alt="JST +21.39%">
+  <img src="images/trade-tnsr-19pct.jpeg" width="200" alt="TNSR +19.14%">
+  <img src="images/trade-tnsr-11pct.jpeg" width="200" alt="TNSR +11.65%">
+</p>
+
+> ⚠️ **Disclaimer:** Hasil masa lalu tidak menjamin performa di masa depan. Gambar di atas adalah hasil trading riil di Bitget.
+
 ---
 
 ## 📖 Deskripsi Project
@@ -112,7 +138,7 @@ hyper-gemma-ai-trader/
 │   ├── exchange/
 │   │   ├── bitget.client.ts         # Client API Bitget V2 (HMAC-SHA256 signature)
 │   │   ├── market-data.provider.ts  # Provider data market real-time (Bitget)
-│   │   └── order.executor.ts        # Eksekutor order ke Bitget (market + plan orders)
+│   │   └── order.executor.ts        # Eksekutor order ke Bitget (atomic SL/TP preset)
 │   ├── database/
 │   │   ├── mongo.ts                 # Koneksi MongoDB
 │   │   ├── models/
@@ -161,6 +187,7 @@ hyper-gemma-ai-trader/
 │   ├── SIMULATION_RESULTS.md        # Hasil simulasi
 │   ├── FINAL_VERIFICATION.md        # Verifikasi final sistem
 │   └── GEMINI.md                    # Catatan AI assistant
+├── images/                          # Screenshot hasil trading riil
 ├── .env                             # Environment variables (tidak di-commit)
 ├── .env.example                     # Template environment variables
 ├── .gitignore                       # Git ignore rules
@@ -272,11 +299,12 @@ Orkestrator keputusan trading AI yang menggabungkan analisis Gemma dengan **hard
 
 - **Pre-AI Risk Check** — Memeriksa posisi penuh atau safety risk sebelum memanggil AI
 - **Continuous Learning** — Menginjeksikan 5 trade terakhir sebagai pelajaran ke prompt (threshold: minimal 5 trades)
-- **Regime Context Injection** — Menghitung Hurst dan Z-Score secara independen untuk menyuntikkan context ke Prompt Builder
+- **Regime Context Injection** — Menghitung Hurst secara independen untuk menyuntikkan context ke Prompt Builder
+- **Synchronized mathDir** — Menerima `mathDir` (trioDirection) langsung dari QuantEngine via `server.ts`, memastikan sinkronisasi sempurna antara sinyal matematika dan guard constraint
 - **GEMMA_FLIP_BLOCKED (Hard Constraint)** — **Fitur kritis** yang mencegah Gemma membalik arah trading saat regime TRENDING:
-  - Menghitung `trioDirection` dari Kalman Filter (harga ≥ kalman = LONG, harga < kalman = SHORT)
+  - Menggunakan `mathDir` dari QuantEngine (bukan recalculate) — **single source of truth**
   - Jika regime TRENDING dan Gemma mencoba arah berlawanan → **Force WAIT**
-  - Contoh: Jika `trioDirection = LONG` dan Gemma return `SHORT` → Diblokir dengan log `⚠️ GEMMA_FLIP_BLOCKED`
+  - Contoh: Jika `mathDir = LONG` dan Gemma return `SHORT` → Diblokir dengan log `⚠️ GEMMA_FLIP_BLOCKED`
   - Menggunakan **inclusive** Hurst check (`>=` threshold) — konsisten dengan QuantEngine
 - **Symbol Injection** — Menyuntikkan `symbol` ke keputusan AI (type-safe)
 - **Final Risk Validation** — Keputusan AI divalidasi ulang oleh Risk Manager sebelum eksekusi
@@ -377,9 +405,15 @@ Client lengkap untuk Bitget Futures API V2 dengan autentikasi HMAC-SHA256:
 | **Get Account Balance** | Mengambil saldo akun (USDT-FUTURES) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
 | **Get Symbol Info** | Mengambil `quantityPrecision`, `pricePrecision`, `maxLeverage`, dan `minTradeUSDT` per simbol |
-| **Place Order** | Membuat market atau limit order |
-| **Place Plan Order** | Membuat trigger-based order untuk SL/TP (plan orders) |
+| **Place Order** | Membuat market/limit order dengan **Atomic SL/TP** (`presetStopLossPrice` + `presetTakeProfitPrice`) |
+| **Place TPSL Order** | Membuat TP/SL order terpisah via `place-tpsl-order` (planType: `profit_plan`/`loss_plan`, holdSide) |
 | **Set Leverage** | Mengatur leverage per simbol (PAPER mode: simulated) |
+| **Set Prefix** | Konfigurasi `clientOid` prefix untuk diferensiasi bot vs script |
+
+**Order Modes:**
+- `tradeSide: 'open'` + `posSide: 'net'` — Unilateral/net position mode
+- **Atomic SL/TP** — SL/TP dikirim dalam request yang sama via `presetStopSurplusPrice` + `presetStopLossPrice`
+- **Standalone TPSL** — `placeTPSLOrder()` untuk SL/TP terpisah dengan `holdSide` (`long`/`short`)
 
 **Autentikasi:**
 - Menggunakan **HMAC-SHA256** signing (`timestamp + method + path + body`)
@@ -388,7 +422,7 @@ Client lengkap untuk Bitget Futures API V2 dengan autentikasi HMAC-SHA256:
 
 **PAPER Mode:**
 - `placeOrder()` → Return mock orderId tanpa mengirim ke exchange
-- `placePlanOrder()` → Return mock orderId untuk SL/TP
+- `placeTPSLOrder()` → Return mock orderId untuk TP/SL
 - `setLeverage()` → Simulated tanpa API call (KYC Bypass)
 
 ---
@@ -406,9 +440,12 @@ Aggregator data market yang menggabungkan raw data dari Bitget dengan indikator 
 - **24h High/Low Data** — Mengambil `high_24h` dan `low_24h` dari raw Bitget ticker
 - **Aggregated Account Metrics** — Menghitung equity, available balance, margin ratio, maintenance margin, margin balance, dan total wallet balance
 - **Active Position Filtering** — Filter posisi dengan `total ≠ 0` dan normalisasi field names
+- **Position Field Mapping** — Memetakan `holdSide` (arah posisi) dan `marginUsed` (`marginSize`/`margin`) dari Bitget ke format internal
 - **Virtual Balance Fallback** — Dalam PAPER mode dengan $0 balance, menyediakan virtual $1.00 untuk simulasi
+- **LIVE Mode Position Isolation** — Dalam LIVE mode, hanya posisi yang memiliki matching trade di session aktif yang dihitung (mencegah interferensi posisi manual)
 - **PAPER Mode Position Isolation** — Dalam PAPER mode, posisi riil di exchange diabaikan:
   - Mock positions dibangun dari `sessionTrades` di sesi aktif saat ini
+  - Mock positions menyertakan `holdSide` dan `marginUsed` yang disimulasikan
   - Setiap mock position menggunakan 10% estimated margin usage
   - Hanya trade dari `currentSessionId` yang dihitung (isolasi antar sesi)
   - Mencegah double-counting saat restart simulasi
@@ -422,8 +459,9 @@ Aggregator data market yang menggabungkan raw data dari Bitget dengan indikator 
 Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 
 - **Dynamic Notional Sizing** — Ukuran order ditentukan oleh formula:
-  - `TARGET_NOTIONAL = max(minBitgetNotional, available_balance × MAX_TRADE_ALLOCATION)`
-  - `minBitgetNotional` diambil langsung dari kontrak exchange per simbol (`symbolInfo.minTradeUSDT`)
+  - `TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance × MAX_TRADE_ALLOCATION)`
+  - `SAFETY_FLOOR = max(symbolInfo.minTradeUSDT, MIN_TPSL_NOTIONAL, 5.5)` — memastikan notional cukup besar untuk SL/TP placement
+  - `MIN_TPSL_NOTIONAL` dikonfigurasi via environment (default: 10 USDT)
   - `MAX_TRADE_ALLOCATION` dikonfigurasi via environment (default: 20% dari balance)
 - **Dynamic Quantity** — Menghitung kuantitas: `ceil(TARGET_NOTIONAL / price)` dengan presisi simbol
 - **Exchange-Aware Leverage** — Mengambil `maxLeverage` langsung dari kontrak Bitget per simbol
@@ -434,11 +472,11 @@ Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 - **Detailed Sizing Log** — Mencatat `targetNotional`, `marginUsed`, `finalLeverage`, dan `qty` per order
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
 - **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
-- **Strategy-Dynamic SL/TP via Plan Orders** — Setelah order utama tereksekusi, otomatis memasang SL/TP menggunakan Bitget Plan Orders:
+- **Atomic SL/TP (Preset)** — SL/TP dikirim **dalam request yang sama** dengan market order (bukan Plan Order terpisah):
+  - `presetStopLossPrice` + `presetTakeProfitPrice` dimasukkan ke body `place-order`
   - `SCALPING/INTRADAY` → SL 1.5%, TP 2.5% (RR ~1:1.67)
   - `SWING` → SL 3%, TP 10% (RR 1:3.3)
-  - Trigger type: `mark_price`
-  - Graceful fallback jika SL/TP gagal
+  - **Benefit:** SL/TP dijamin terpasang, tidak ada race condition atau partial fill
 
 ---
 
@@ -534,7 +572,7 @@ runHybridTradingLoop(mode) {
 
   while (true) {
     2. Cek Account & Risk Status
-       - Jika Safety Block → Portfolio Snapshot → Wait 10s → Retry
+       - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 10s → Retry
     3. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
        - VIP: 17 major pairs (BTC, ETH, BNB, XRP, SUI, TON, dll)
        - HOT50: Top 50 by volume
@@ -546,10 +584,12 @@ runHybridTradingLoop(mode) {
           - Pulse log: [PULSE] BTCUSDT | Z: -1.85 (-1.50) | H: 0.62 [TRND]
           - MODE A (Trending, H ≥ threshold): Kalman + VWAP momentum → Hit!
           - MODE B (Ranging, H < threshold): Z-Score extreme + Bounce + VWAP value area → Hit!
-       b. 🤖 AI SNIPER (Gemma confirms):
-          - Kirim ke Decision Engine → Gemma validasi
-          - Jika LONG/SHORT → TACTICAL STRIKE → Execute
-          - Jika SKIP/WAIT → TACTICAL VETO → Skip
+          - Return trioDirection (Kalman direction) untuk sinkronisasi guard
+       b. 🤖 AI SNIPER (Gemma confirms, dengan mathDir dari Trinity):
+           - Kirim ke Decision Engine + mathDir → Gemma validasi
+           - GEMMA_FLIP_BLOCKED guard menggunakan mathDir dari step (a)
+           - Jika LONG/SHORT → TACTICAL STRIKE → Execute (Atomic SL/TP)
+           - Jika SKIP/WAIT → TACTICAL VETO → Skip
        c. ⏱️ Micro-delay 50ms antar pair
     5. Wait 1s → Ulang dari step 2
     * On crash → Wait 5s → Retry
@@ -725,8 +765,9 @@ npm run dev
 | `BITGET_PASSPHRASE` | Passphrase Bitget | — (wajib) |
 | `BITGET_BASE_URL` | Base URL Bitget API | `https://api.bitget.com` |
 | `TRADING_MODE` | Mode trading: `PAPER` (simulasi) atau `LIVE` | `PAPER` |
-| `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `2` |
+| `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `1` |
 | `MAX_TRADE_ALLOCATION` | Persentase balance per trade (0.0-1.0) | `0.20` (20%) |
+| `MIN_TPSL_NOTIONAL` | Minimum notional agar SL/TP bisa terpasang (USDT) | `10` |
 | `TRADING_STRATEGY` | Strategi trading: `SCALPING` / `INTRADAY` / `SWING` | `INTRADAY` |
 | `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT50` / `ALL` | `VIP` |
 | `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
@@ -742,15 +783,19 @@ npm run dev
 - [x] **Regime-Aware Execution** (Trend Following vs Mean Reversion berdasarkan Hurst)
 - [x] **Dual Window Analysis** (Short 20 candles + Long 100 candles)
 - [x] **OHLCV Data Pipeline** (Full candlestick data dari Bitget)
-- [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, plan orders)
+- [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, atomic SL/TP)
 - [x] **PAPER Mode Position Isolation** (mock positions dari session trades, bukan exchange riil)
+- [x] **LIVE Mode Position Isolation** (filter posisi by session trades)
 - [x] **Scan Mode System** (VIP / HOT50 / ALL)
 - [x] **Real-time Trinity Pulse** (Z-Score + Hurst + Regime terminal visualization)
 - [x] AI Decision Engine dengan Gemma 4
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
 - [x] **Auto-Leverage Optimization** (auto-increase + exchange-aware cap)
-- [x] **Dynamic Notional Sizing** (MAX_TRADE_ALLOCATION + minTradeUSDT dari exchange)
-- [x] **Strategy-Dynamic SL/TP** (Bitget Plan Orders, mark_price trigger)
+- [x] **Dynamic Notional Sizing** (MAX_TRADE_ALLOCATION + minTradeUSDT + MIN_TPSL_NOTIONAL safety floor)
+- [x] **Atomic SL/TP** (preset params dalam request market order, bukan plan order terpisah)
+- [x] **TPSL Order Support** (`place-tpsl-order` endpoint dengan holdSide + planType)
+- [x] **trioDirection Passthrough** (QuantEngine → server.ts → DecisionEngine — single source of truth)
+- [x] **holdSide/marginUsed Mapping** (field posisi dari Bitget V2 dipetakan akurat)
 - [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
 - [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
 - [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
