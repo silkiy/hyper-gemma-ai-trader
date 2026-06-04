@@ -33,7 +33,15 @@
   <img src="images/trade-tnsr-11pct.jpeg" width="200" alt="TNSR +11.65%">
 </p>
 
-> ⚠️ **Disclaimer:** Hasil masa lalu tidak menjamin performa di masa depan. Gambar di atas adalah hasil trading riil di Bitget.
+### Contoh Trade Loss
+
+<p align="center">
+  <img src="images/trade-asts-loss.jpeg" width="200" alt="ASTS -20.22%">
+  <img src="images/trade-rune-loss.jpeg" width="200" alt="RUNE -18.66%">
+  <img src="images/trade-frax-loss.jpeg" width="200" alt="FRAX -7.74%">
+</p>
+
+> ⚠️ **Disclaimer:** Hasil masa lalu tidak menjamin performa di masa depan. Trading memiliki risiko — tidak semua trade profit. Gambar di atas adalah hasil trading riil di Bitget.
 
 ---
 
