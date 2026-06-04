@@ -10,11 +10,12 @@
 
 ## 📈 Live Trading Results
 
-> **Total ROI: +4,175.89%** (Desember 2025 — Juni 2026) | **30-Day ROI: +619.16%**
+> **Total ROI: +4,175.89%** (Desember 2025 — Juni 2026) | **1-Month ROI: +1,752.07%** | **Win Rate: 62.06%**
 
 <p align="center">
-  <img src="images/roi-total-4175.jpeg" width="280" alt="Total ROI +4175.89%">
-  <img src="images/roi-30d-619.jpeg" width="280" alt="30-Day ROI +619.16%">
+  <img src="images/roi-total-4175.jpeg" width="220" alt="Total ROI +4175.89%">
+  <img src="images/roi-1month-1752.jpeg" width="220" alt="1-Month ROI +1752.07%">
+  <img src="images/winrate-62pct.jpeg" width="220" alt="Win Rate 62.06%">
 </p>
 
 ### Contoh Trade Profit
