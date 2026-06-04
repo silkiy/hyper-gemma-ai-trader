@@ -20,7 +20,7 @@ export const AIDecisionSchema = z.object({
     if (['LOW', 'MEDIUM', 'HIGH'].includes(s)) return s;
     return 'MEDIUM';
   }, z.nativeEnum(RiskLevel)),
-  leverage_suggestion: z.number().min(1).max(500),
+  leverage_suggestion: z.coerce.number().min(1).max(500),
   position_size: z.preprocess((val: any) => {
     const s = String(val).toUpperCase();
     if (['SMALL', 'NORMAL', 'REDUCED'].includes(s)) return s;

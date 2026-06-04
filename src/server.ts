@@ -30,22 +30,29 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
     if (activePositions.length > 0) {
       logger.info({ 
         activePositions: activePositions.map(p => {
-          const size = parseFloat(p.positionAmt || p.size || '0');
+          const size = parseFloat(p.size || '0');
           const entryPrice = parseFloat(p.entryPrice || '0');
           const markPrice = parseFloat(p.markPrice || '0');
           const leverage = parseFloat(p.leverage || '1');
-          const pnl = parseFloat(p.unRealizedProfit || p.unrealizedProfit || p.pnl || '0');
+          const pnl = parseFloat(p.unRealizedProfit || '0');
           const liqPrice = parseFloat(p.liquidationPrice || '0');
-          const margin = leverage > 0 ? (Math.abs(size) * entryPrice) / leverage : 0;
+          
+          // Use mapped marginUsed or calculate fallback
+          const margin = parseFloat(p.marginUsed || '0') || (leverage > 0 ? (Math.abs(size) * entryPrice) / leverage : 0);
           const roe = margin > 0 ? (pnl / margin) * 100 : 0;
 
           const entryPriceFormatted = entryPrice < 0.01 ? entryPrice.toFixed(7) : (entryPrice < 1 ? entryPrice.toFixed(4) : entryPrice.toFixed(2));
           const markPriceFormatted = markPrice < 0.01 ? markPrice.toFixed(7) : (markPrice < 1 ? markPrice.toFixed(4) : markPrice.toFixed(2));
           const liqPriceFormatted = liqPrice < 0.01 ? liqPrice.toFixed(7) : (liqPrice < 1 ? liqPrice.toFixed(4) : liqPrice.toFixed(2));
 
+          // FIX 3: Use holdSide for accurate direction
+          let sideDisplay = 'NEUTRAL';
+          if (p.holdSide) sideDisplay = p.holdSide.toUpperCase();
+          else sideDisplay = size > 0 ? 'LONG' : (size < 0 ? 'SHORT' : 'CLOSED');
+
           return {
             symbol: p.symbol,
-            side: size > 0 ? 'LONG' : (size < 0 ? 'SHORT' : 'CLOSED'),
+            side: sideDisplay,
             size: size.toString(),
             entryPrice: entryPriceFormatted,
             markPrice: markPriceFormatted,
@@ -80,7 +87,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
       const dummyDecision = { decision: TradeAction.SKIP, final_summary: 'PRE_SCAN_CHECK' } as any;
       const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
       
-      if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked: Safety')) {
+      if (riskValidation.decision === TradeAction.SKIP && (riskValidation.final_summary?.startsWith('Blocked: Safety') || riskValidation.final_summary?.startsWith('Blocked: Max positions'))) {
         await displayPortfolioSnapshot(accountStatus);
         await new Promise(resolve => setTimeout(resolve, 10000));
         continue;
@@ -119,7 +126,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
           const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, 100);
           
           // 1. MATH SENSOR (Trinity: Z + Hurst + VWAP)
-          const { decision: quantDecision, zScore, threshold, hurst } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
+          const { decision: quantDecision, zScore, threshold, hurst, trioDirection: mathDir } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
           
           // Real-time Pulse Log (Trinity View)
           const thresholdSymbol = zScore < 0 ? `-${threshold.toFixed(2)}` : `+${threshold.toFixed(2)}`;
@@ -128,10 +135,11 @@ async function runHybridTradingLoop(mode: SessionMode) {
 
           if (quantDecision) {
             console.log(''); // Clear pulse line
-            logger.info({ pair, zScore: zScore.toFixed(2), hurst: hurst.toFixed(2), regime }, '🎯 TRINITY SENSOR HIT!');
+            logger.info({ pair, zScore: zScore.toFixed(2), hurst: hurst.toFixed(2), regime, mathDir }, '🎯 TRINITY SENSOR HIT!');
             
             // 2. AI SNIPER (Gemma confirms the math signal)
-            const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode);
+            // Pass mathDir to ensure guard logic is synchronized
+            const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode, mathDir);
             
             if (tacticalDecision.decision !== 'SKIP' && tacticalDecision.decision !== 'WAIT') {
               logger.info({ pair }, '⚡ TACTICAL STRIKE: Gemma confirmed! Executing trade...');
