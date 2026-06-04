@@ -32,7 +32,7 @@ class BacktestEngine {
       
       try {
         if (!pair) continue;
-        const decision = await this.decisionEngine.evaluateTrade(pair, SessionMode.NORMAL);
+        const decision = await this.decisionEngine.evaluateTrade(pair, SessionMode.NORMAL, 'NEUTRAL');
         
         // Test Trade Service integration
         await tradeService.handleTradeDecision(decision, pair);

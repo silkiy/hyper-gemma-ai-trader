@@ -15,7 +15,7 @@ class FinalVerificationEngine {
     // 1. Verify Indicator & Market Logic (Integrated in Decision Engine)
     logger.info('Test 1: Market Data & Indicator Integration (ASTERDEX)');
     try {
-      const decision = await decisionEngine.evaluateTrade('ETH-USDC', SessionMode.NORMAL);
+      const decision = await decisionEngine.evaluateTrade('ETH-USDC', SessionMode.NORMAL, 'NEUTRAL');
       verificationResults.push({ feature: 'Indicator Engine (ASTERDEX)', status: 'PASS', detail: `Price: ${decision.market_regime} detected` });
     } catch (e: any) {
       verificationResults.push({ feature: 'Indicator Engine (ASTERDEX)', status: 'FAIL', detail: e.message });

@@ -26,7 +26,7 @@ async function runHighFidelitySimulation() {
             // Mocking repository to simulate learning from previous steps
             // (Normally it fetches from DB, but for sim we inject it)
             
-            const decision = await decisionEngine.evaluateTrade(pair, SessionMode.NORMAL);
+            const decision = await decisionEngine.evaluateTrade(pair, SessionMode.NORMAL, 'NEUTRAL');
             
             // Calculate a simulated outcome
             const isWin = Math.random() > 0.4; // 60% win rate for simulation
