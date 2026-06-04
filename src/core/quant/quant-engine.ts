@@ -31,9 +31,15 @@ export class QuantEngine {
    * THE QUANT TRINITY: Z-Score, Hurst, and VWAP.
    * Evaluates the market regime and triggers tactical execution.
    */
-  async evaluateHighSpeed(symbol: string, ohlcv: OHLCV[]): Promise<{ decision: AIDecision | null, zScore: number, threshold: number, hurst: number }> {
+  async evaluateHighSpeed(symbol: string, ohlcv: OHLCV[]): Promise<{ 
+    decision: AIDecision | null, 
+    zScore: number, 
+    threshold: number, 
+    hurst: number,
+    trioDirection: 'LONG' | 'SHORT' | 'NEUTRAL'
+  }> {
     const directive = await directiveRepository.getLatest();
-    if (!directive || ohlcv.length < 50) return { decision: null, zScore: 0, threshold: 0, hurst: 0.5 };
+    if (!directive || ohlcv.length < 50) return { decision: null, zScore: 0, threshold: 0, hurst: 0.5, trioDirection: 'NEUTRAL' };
 
     const prices = ohlcv.map(d => d.c);
     const lastPrice = prices[prices.length - 1]!;
@@ -66,42 +72,33 @@ export class QuantEngine {
 
     let decision: TradeAction = TradeAction.SKIP;
     let strategyNote = '';
+    const trioDirection = isKalmanBullish ? 'LONG' : 'SHORT';
 
-    // MODE A: TREND FOLLOWING (Hurst > Threshold)
+    // MODE A: TREND FOLLOWING (Hurst >= Threshold)
     if (isTrending) {
       strategyNote = 'Trend Following (Hurst Driven)';
       if (directive.bias === 'LONG' || directive.bias === 'NEUTRAL') {
-        // Entry on trend continuation: Kalman Bullish + Price above VWAP (Healthy momentum)
         if (isKalmanBullish && vwapDev > 0) decision = TradeAction.LONG;
       } 
       if (directive.bias === 'SHORT' || directive.bias === 'NEUTRAL') {
         if (isKalmanBearish && vwapDev < 0) decision = TradeAction.SHORT;
       }
     } 
-    // MODE B: MEAN REVERSION (Hurst <= Threshold)
+    // MODE B: MEAN REVERSION (Hurst < Threshold)
     else {
       strategyNote = 'Mean Reversion (Z-Score Driven)';
       const isBouncingUp = lastPrice >= prevPrice;
       const isBouncingDown = lastPrice <= prevPrice;
 
       if (directive.bias === 'LONG' || directive.bias === 'NEUTRAL') {
-        // Entry on dip: Z-Score negative extreme + bounce + below VWAP (Value area)
         if (zScore <= -zThreshold && isBouncingUp && vwapDev < 0.1) decision = TradeAction.LONG;
       }
       if (directive.bias === 'SHORT' || directive.bias === 'NEUTRAL') {
-        // Entry on pump: Z-Score positive extreme + rejection + above VWAP (Premium area)
         if (zScore >= zThreshold && isBouncingDown && vwapDev > -0.1) decision = TradeAction.SHORT;
       }
     }
 
-    if (decision === TradeAction.SKIP) return { decision: null, zScore, threshold: zThreshold, hurst };
-
-    // FIX 1: Hard Constraint - Block Gemma Flip in TRENDING regime
-    // This logic ensures AI reasoning doesn't contradict the mathematical regime
-    if (isTrending) {
-      // Logic for AI confirmation would normally happen in server.ts/decision-engine
-      // However, we return the 'ideal' Trio direction here so the engine knows the target.
-    }
+    if (decision === TradeAction.SKIP) return { decision: null, zScore, threshold: zThreshold, hurst, trioDirection };
 
     const confidence = Math.min(Math.abs(zScore) * 30, 95);
 
@@ -110,7 +107,8 @@ export class QuantEngine {
       decision, 
       hurst: hurst.toFixed(2), 
       regime: isTrending ? 'TRENDING' : 'RANGING',
-      vwapDev: `${vwapDev.toFixed(2)}%`
+      vwapDev: `${vwapDev.toFixed(2)}%`,
+      mathDir: trioDirection
     }, `⚡ HOT PATH: ${strategyNote} triggered`);
 
     return {
@@ -122,7 +120,7 @@ export class QuantEngine {
         risk_level: RiskLevel.MEDIUM,
         leverage_suggestion: directive.max_leverage,
         position_size: PositionSize.NORMAL,
-        entry_reason: `Trinity Hit: ${strategyNote}. Hurst: ${hurst.toFixed(2)}, Z: ${zScore.toFixed(2)}, VWAP Dev: ${vwapDev.toFixed(2)}%`,
+        entry_reason: `Trinity Hit: ${strategyNote}. Hurst: ${hurst.toFixed(2)}, Z: ${zScore.toFixed(2)}, VWAP Dev: ${vwapDev.toFixed(2)}%, Dir: ${trioDirection}`,
         risk_factors: [`Hurst Exponent at ${hurst.toFixed(2)}`],
         stop_loss_logic: 'ATR Based (Trinity)',
         take_profit_logic: 'R/R 1.5 (Trinity)',
@@ -131,7 +129,8 @@ export class QuantEngine {
       },
       zScore,
       threshold: zThreshold,
-      hurst
+      hurst,
+      trioDirection
     };
   }
 }
