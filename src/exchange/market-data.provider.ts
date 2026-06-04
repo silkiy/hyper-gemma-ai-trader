@@ -70,7 +70,7 @@ export class MarketDataProvider {
       const positions = await bitgetClient.getPositions();
       
       const usdtAccount = accounts.find((a: any) => a.marginCoin === 'USDT');
-      let walletBalance = usdtAccount ? parseFloat(usdtAccount.equity || '0') : 0;
+      let walletBalance = usdtAccount ? parseFloat(usdtAccount.accountEquity || usdtAccount.equity || '0') : 0;
       let availableBalance = usdtAccount ? parseFloat(usdtAccount.available || '0') : 0;
       
       // VIRTUAL BALANCE FALLBACK (For PAPER mode with 0 actual funds)
@@ -89,7 +89,7 @@ export class MarketDataProvider {
       
       activePositions.forEach((p: any) => {
         totalUnrealizedPnL += parseFloat(p.unrealizedPL || '0');
-        totalMaintenanceMargin += parseFloat(p.margin || '0');
+        totalMaintenanceMargin += parseFloat(p.marginSize || p.margin || '0');
       });
 
       let mappedPositions = activePositions.map(p => ({
@@ -99,8 +99,22 @@ export class MarketDataProvider {
         markPrice: p.markPrice,
         unRealizedProfit: p.unrealizedPL,
         liquidationPrice: p.liquidationPrice,
-        leverage: p.leverage
+        leverage: p.leverage,
+        holdSide: p.holdSide, // FIX 3: Explicitly store long/short from Bitget
+        marginUsed: p.marginSize || p.margin // FIX 2: Correct margin field
       }));
+
+      // FIX: Isolation for LIVE MODE (Ignore positions not started by this bot)
+      if (env.TRADING_MODE === 'LIVE') {
+        const currentSessionId = sessionService.getCurrentSessionId();
+        const recentTrades = await tradeRepository.findRecent(20);
+        const sessionTrades = recentTrades.filter(t => t.session_id.toString() === currentSessionId);
+        
+        // Only keep positions that have a matching trade in the current session
+        mappedPositions = mappedPositions.filter(pos => 
+          sessionTrades.some(t => t.pair === pos.symbol)
+        );
+      }
 
       // FIX 2: Isolation for PAPER MODE
       if (env.TRADING_MODE === 'PAPER') {
@@ -122,7 +136,9 @@ export class MarketDataProvider {
               markPrice: t.entry_price?.toString() || '0',
               unRealizedProfit: '0',
               liquidationPrice: '0',
-              leverage: t.leverage?.toString() || '1'
+              leverage: t.leverage?.toString() || '1',
+              holdSide: t.action.toLowerCase() === 'buy' ? 'long' : 'short', // Mock direction
+              marginUsed: '0.10'
             });
             // Assume 20% margin usage for each mock position for calculation
             totalMaintenanceMargin += 0.10; 

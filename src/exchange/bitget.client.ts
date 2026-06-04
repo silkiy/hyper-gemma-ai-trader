@@ -8,6 +8,7 @@ export class BitgetClient {
   private secretKey: string;
   private passphrase: string;
   private baseUrl: string;
+  private clientOidPrefix: string = 'bot'; // Default prefix
 
   constructor() {
     this.apiKey = env.BITGET_API_KEY || '';
@@ -18,6 +19,13 @@ export class BitgetClient {
     if (!this.apiKey || !this.secretKey || !this.passphrase) {
       logger.error('CRITICAL: Bitget credentials (Key, Secret, or Passphrase) missing in .env');
     }
+  }
+
+  /**
+   * Set a custom prefix for clientOid (e.g., 'test' for standalone scripts)
+   */
+  setPrefix(prefix: string) {
+    this.clientOidPrefix = prefix;
   }
 
   private getTimestamp(): string {
@@ -76,7 +84,6 @@ export class BitgetClient {
       return response.data.data.map((t: any) => ({
         symbol: t.symbol.replace('_UMCBL', ''),
         lastPrice: t.lastPr,
-        // Bitget V2 ratio change (0.01 = 1%)
         priceChangePercent: (parseFloat(t.change24h || t.changeUtc24h || '0') * 100).toFixed(3),
         volume: t.usdtVolume || t.quoteVolume || t.baseVolume || '0'
       }));
@@ -144,6 +151,8 @@ export class BitgetClient {
     orderType: 'market' | 'limit';
     size: string;
     price?: string;
+    presetTakeProfitPrice?: string;
+    presetStopLossPrice?: string;
   }) {
     if (env.TRADING_MODE === 'PAPER') {
       logger.info({ symbol: order.symbol, side: order.side }, 'PAPER MODE: Simulating market order (KYC Bypass)');
@@ -158,12 +167,17 @@ export class BitgetClient {
       productType: 'USDT-FUTURES',
       marginCoin: 'USDT',
       marginMode: 'crossed',
-      side: order.side,
+      side: order.side, // buy or sell
+      tradeSide: 'open',
+      posSide: 'net',
       orderType: order.orderType,
       size: order.size,
-      price: order.price,
-      clientOid: `bitget-${Date.now()}`
+      price: order.orderType === 'limit' ? order.price : '',
+      presetStopSurplusPrice: order.presetTakeProfitPrice || '', // Take Profit
+      presetStopLossPrice: order.presetStopLossPrice || '',       // Stop Loss
+      clientOid: `${this.clientOidPrefix}-${Date.now()}`
     });
+
 
     const signature = this.generateSignature(timestamp, 'POST', requestPath, body);
     
@@ -218,35 +232,37 @@ export class BitgetClient {
     }
   }
 
-  async placePlanOrder(order: {
+  /**
+   * DEFINITIVE SL/TP FIX for Bitget V2 Unilateral Mode.
+   * Uses place-tpsl-order with planType, holdSide (long/short), and orderType.
+   */
+  async placeTPSLOrder(order: {
     symbol: string;
-    side: 'buy' | 'sell';
-    orderType: 'market' | 'limit';
-    size: string;
+    planType: 'profit_plan' | 'loss_plan';
     triggerPrice: string;
     triggerType: 'mark_price' | 'fill_price';
-    executePrice?: string;
+    holdSide: 'long' | 'short'; // Use long/short for holdSide identity
+    size: string;
   }) {
     if (env.TRADING_MODE === 'PAPER') {
-      logger.info({ symbol: order.symbol, trigger: order.triggerPrice }, 'PAPER MODE: Simulating SL/TP plan order (KYC Bypass)');
-      return { code: '00000', data: { orderId: `mock-plan-${Date.now()}` } };
+      logger.info({ symbol: order.symbol, type: order.planType }, 'PAPER MODE: Simulating TPSL order');
+      return { code: '00000', data: { orderId: `mock-tpsl-${Date.now()}` } };
     }
 
     const formattedSymbol = this.formatSymbol(order.symbol);
     const timestamp = this.getTimestamp();
-    const requestPath = '/api/v2/mix/order/place-plan-order';
+    const requestPath = '/api/v2/mix/order/place-tpsl-order';
     const body = JSON.stringify({
       symbol: formattedSymbol,
       productType: 'USDT-FUTURES',
       marginCoin: 'USDT',
-      marginMode: 'crossed',
-      side: order.side,
-      orderType: order.orderType,
-      size: order.size,
+      planType: order.planType,
       triggerPrice: order.triggerPrice,
       triggerType: order.triggerType,
-      executePrice: order.executePrice,
-      clientOid: `bitget-plan-${Date.now()}`
+      orderType: 'market', // Market execution on trigger
+      holdSide: order.holdSide,
+      size: order.size,
+      clientOid: `${this.clientOidPrefix}-plan-${Date.now()}`
     });
 
     const signature = this.generateSignature(timestamp, 'POST', requestPath, body);
@@ -259,7 +275,7 @@ export class BitgetClient {
       return response.data;
     } catch (error: any) {
       const msg = error.response?.data?.msg || error.message;
-      logger.error({ symbol: order.symbol, error: msg }, 'Failed to place plan order on Bitget V2');
+      logger.error({ symbol: order.symbol, error: msg }, 'Failed to place TPSL order on Bitget V2');
       throw error;
     }
   }

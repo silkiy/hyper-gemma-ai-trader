@@ -25,14 +25,14 @@ export class OrderExecutor {
       const precision = symbolInfo.quantityPrecision;
       const pricePrecision = symbolInfo.pricePrecision;
       const maxExchangeLeverage = symbolInfo.maxLeverage;
-      const minBitgetNotional = symbolInfo.minTradeUSDT;
+      
+      // SAFETY FLOOR: Ensure notional is large enough for SL/TP placement
+      const minBitgetNotional = Math.max(symbolInfo.minTradeUSDT, env.MIN_TPSL_NOTIONAL, 5.5); 
 
       // 3. AUTO-LEVERAGE OPTIMIZATION & NOTIONAL SIZING
       const available = accountStatus.available_balance || 0;
       
-      // TARGET_NOTIONAL = max(MIN_BITGET_NOTIONAL, available_balance * MAX_TRADE_ALLOCATION)
-      // This strict formula guarantees we never risk more than the allocated percentage of our balance
-      // unless the exchange minimum forces us to (which we then check affordability for).
+      // TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance * MAX_TRADE_ALLOCATION)
       const maxTradeAllocation = env.MAX_TRADE_ALLOCATION; 
       const targetNotional = Math.max(minBitgetNotional, available * maxTradeAllocation);
 
@@ -69,59 +69,38 @@ export class OrderExecutor {
       // Set Leverage first
       await bitgetClient.setLeverage(symbol, finalLeverage);
 
-      // 5. Execute Market Order
+      // 5. Calculate SL/TP Prices BEFORE opening position
+      let slPercent = 0.015; 
+      let tpPercent = 0.025; 
+
+      const strategy = env.TRADING_STRATEGY;
+      if (strategy === 'SWING') {
+        slPercent = 0.03;
+        tpPercent = 0.10;
+      }
+
       const side: 'buy' | 'sell' = decision.decision === TradeAction.LONG ? 'buy' : 'sell';
-      
+      const slPrice = side === 'buy' ? price * (1 - slPercent) : price * (1 + slPercent);
+      const tpPrice = side === 'buy' ? price * (1 + tpPercent) : price * (1 - tpPercent);
+
+      logger.info({ 
+        symbol, 
+        sl: slPrice.toFixed(pricePrecision), 
+        tp: tpPrice.toFixed(pricePrecision) 
+      }, 'Calculating ATOMIC SL/TP prices...');
+
+      // 6. Execute ATOMIC Market Order with PRESET SL/TP
       const orderResponse = await bitgetClient.placeOrder({
         symbol: symbol,
         side: side,
         orderType: 'market',
-        size: quantityStr
+        size: quantityStr,
+        presetStopLossPrice: slPrice.toFixed(pricePrecision),
+        presetTakeProfitPrice: tpPrice.toFixed(pricePrecision)
       });
 
       const orderId = orderResponse.data.orderId;
-      logger.info({ orderId, leverage: finalLeverage }, 'Order executed successfully on Bitget V2');
-
-      // 6. Automated SL/TP (Plan Orders)
-      try {
-        let slPercent = 0.015; 
-        let tpPercent = 0.025; 
-
-        const strategy = env.TRADING_STRATEGY;
-        if (strategy === 'SWING') {
-          slPercent = 0.03;
-          tpPercent = 0.10;
-        }
-
-        const slPrice = side === 'buy' ? price * (1 - slPercent) : price * (1 + slPercent);
-        const tpPrice = side === 'buy' ? price * (1 + tpPercent) : price * (1 - tpPercent);
-
-        logger.info({ slPrice: slPrice.toFixed(pricePrecision), tpPrice: tpPrice.toFixed(pricePrecision) }, 'Placing Bitget V2 SL/TP...');
-
-        // Place Stop Loss Plan
-        await bitgetClient.placePlanOrder({
-          symbol,
-          side: side === 'buy' ? 'sell' : 'buy', // Exit side
-          orderType: 'market',
-          size: quantityStr,
-          triggerPrice: slPrice.toFixed(pricePrecision),
-          triggerType: 'mark_price'
-        });
-
-        // Place Take Profit Plan
-        await bitgetClient.placePlanOrder({
-          symbol,
-          side: side === 'buy' ? 'sell' : 'buy', // Exit side
-          orderType: 'market',
-          size: quantityStr,
-          triggerPrice: tpPrice.toFixed(pricePrecision),
-          triggerType: 'mark_price'
-        });
-
-        logger.info('Bitget V2 SL/TP orders active.');
-      } catch (planError: any) {
-        logger.warn({ error: planError.message }, 'Failed to place SL/TP Plan orders.');
-      }
+      logger.info({ orderId, leverage: finalLeverage }, 'Order executed ATOMICALLY with SL/TP on Bitget V2');
       
       return { orderId, status: 'FILLED', price };
     } catch (error: any) {
