@@ -28,7 +28,7 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
     }, '📊 ACCOUNT SUMMARY');
 
     if (activePositions.length > 0) {
-      logger.info({ 
+      logger.info({
         activePositions: activePositions.map(p => {
           const size = parseFloat(p.size || '0');
           const entryPrice = parseFloat(p.entryPrice || '0');
@@ -36,7 +36,7 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
           const leverage = parseFloat(p.leverage || '1');
           const pnl = parseFloat(p.unRealizedProfit || '0');
           const liqPrice = parseFloat(p.liquidationPrice || '0');
-          
+
           // Use mapped marginUsed or calculate fallback
           const margin = parseFloat(p.marginUsed || '0') || (leverage > 0 ? (Math.abs(size) * entryPrice) / leverage : 0);
           const roe = margin > 0 ? (pnl / margin) * 100 : 0;
@@ -74,7 +74,7 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
 
 async function runHybridTradingLoop(mode: SessionMode) {
   logger.info('🚀 HYBRID TACTICAL ENGINE STARTED');
-  
+
   // 1. Initial Strategy Refresh
   await strategyGovernor.refreshDirective();
 
@@ -82,11 +82,11 @@ async function runHybridTradingLoop(mode: SessionMode) {
   while (true) {
     try {
       const accountStatus = await marketDataProvider.getAccountStatus();
-      
+
       // Check for safety blocks (Max positions or Critical Safety)
       const dummyDecision = { decision: TradeAction.SKIP, final_summary: 'PRE_SCAN_CHECK' } as any;
       const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
-      
+
       if (riskValidation.decision === TradeAction.SKIP && (riskValidation.final_summary?.startsWith('Blocked: Safety') || riskValidation.final_summary?.startsWith('Blocked: Max positions'))) {
         await displayPortfolioSnapshot(accountStatus);
         await new Promise(resolve => setTimeout(resolve, 10000));
@@ -94,9 +94,9 @@ async function runHybridTradingLoop(mode: SessionMode) {
       }
 
       const allTickers = await bitgetClient.getAllTickers();
-      
+
       const majorPairs = [
-        'BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'BNBUSDT', 'XRPUSDT', 
+        'BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'BNBUSDT', 'XRPUSDT',
         'ZECUSDT', 'XLMUSDT', 'SUIUSDT', 'TONUSDT', 'BCHUSDT',
         'LINKUSDT', 'ADAUSDT', 'AVAXUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT',
         'HYPEUSDT'
@@ -110,11 +110,35 @@ async function runHybridTradingLoop(mode: SessionMode) {
           .map((t: any) => t.symbol);
       } else if (env.SCAN_MODE === 'ALL') {
         hotPairs = allTickers.map((t: any) => t.symbol);
-      } else {
-        // Default: HOT50 (Top 50 by volume)
+      } else if (env.SCAN_MODE === 'HOT5') {
+        hotPairs = allTickers.sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+          .slice(0, 5)
+          .map((t: any) => t.symbol);
+      }
+      else if (env.SCAN_MODE === 'HOT20') {
+        // Default: HOT20 (Top 50 by volume)
         hotPairs = allTickers
           .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
-          .slice(0, 50)
+          .slice(6, 20)
+          .map((t: any) => t.symbol);
+      } else if (env.SCAN_MODE === 'HOT40') {
+        hotPairs = allTickers.sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+          .slice(21, 40)
+          .map((t: any) => t.symbol);
+      } else if (env.SCAN_MODE === 'HOT60') {
+        hotPairs = allTickers
+          .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+          .slice(41, 60)
+          .map((t: any) => t.symbol);
+      } else if (env.SCAN_MODE === 'HOT80') {
+        hotPairs = allTickers
+          .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+          .slice(61, 80)
+          .map((t: any) => t.symbol);
+      } else {
+        hotPairs = allTickers
+          .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+          .slice(81, 100)
           .map((t: any) => t.symbol);
       }
 
@@ -124,10 +148,10 @@ async function runHybridTradingLoop(mode: SessionMode) {
         try {
           // Get full OHLCV history for Trinity analysis (100 candles)
           const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, 100);
-          
+
           // 1. MATH SENSOR (Trinity: Z + Hurst + VWAP)
           const { decision: quantDecision, zScore, threshold, hurst, trioDirection: mathDir } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
-          
+
           // Real-time Pulse Log (Trinity View)
           const thresholdSymbol = zScore < 0 ? `-${threshold.toFixed(2)}` : `+${threshold.toFixed(2)}`;
           const regime = hurst >= (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRND' : 'RNG';
@@ -136,17 +160,17 @@ async function runHybridTradingLoop(mode: SessionMode) {
           if (quantDecision) {
             console.log(''); // Clear pulse line
             logger.info({ pair, zScore: zScore.toFixed(2), hurst: hurst.toFixed(2), regime, mathDir }, '🎯 TRINITY SENSOR HIT!');
-            
+
             // 2. AI SNIPER (Gemma confirms the math signal)
             // Pass mathDir to ensure guard logic is synchronized
             const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode, mathDir);
-            
+
             if (tacticalDecision.decision !== 'SKIP' && tacticalDecision.decision !== 'WAIT') {
               logger.info({ pair }, '⚡ TACTICAL STRIKE: Gemma confirmed! Executing trade...');
               const execution = await tradeService.handleTradeDecision(tacticalDecision, pair);
               if (execution) {
                 console.log(''); // Clear pulse line
-                break; 
+                break;
               }
             } else {
               logger.info({ pair, reason: tacticalDecision.final_summary }, '❌ TACTICAL VETO: Gemma rejected the math signal.');
@@ -158,7 +182,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
         }
         await new Promise(resolve => setTimeout(resolve, 50));
       }
-      
+
       process.stdout.write(`\r[QUANT PULSE] Cycle complete. Waiting for next cycle...      `);
 
       await new Promise(resolve => setTimeout(resolve, 1000));
