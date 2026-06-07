@@ -19,10 +19,10 @@ const envSchema = z.object({
   HYPERLIQUID_TESTNET: z.string().default('true').transform(v => v !== 'false'),
   PORT: z.string().default('3000').transform(Number),
   MAX_POSITIONS: z.string().default('1').transform(Number),
-  MAX_TRADE_ALLOCATION: z.string().default('0.20').transform(Number), // Default 20% of balance
+  MAX_TRADE_ALLOCATION: z.string().default('0.25').transform(Number), // Default 20% of balance
   MIN_TPSL_NOTIONAL: z.string().default('10').transform(Number), // Default 10 USDT for SL/TP
   TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
-  SCAN_MODE: z.enum(['VIP', 'HOT50', 'ALL']).default('VIP'),
+  SCAN_MODE: z.enum(['VIP','HOT5' ,'HOT20', 'HOT40','HOT60','HOT80','HOT100', 'ALL']).default('VIP'),
   TRADING_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
 });
 
