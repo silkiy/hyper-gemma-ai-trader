@@ -584,7 +584,12 @@ runHybridTradingLoop(mode) {
        - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 10s → Retry
     3. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
        - VIP: 17 major pairs (BTC, ETH, BNB, XRP, SUI, TON, dll)
-       - HOT50: Top 50 by volume
+       - HOT5: Top 5 by volume
+       - HOT20: Rank 6-20 by volume
+       - HOT40: Rank 21-40 by volume
+       - HOT60: Rank 41-60 by volume
+       - HOT80: Rank 61-80 by volume
+       - HOT100 (default): Rank 81-100 by volume
        - ALL: Seluruh market
     4. Loop setiap hot pair:
        a. 📊 TRINITY SENSOR (Instant, 100 candles):
@@ -611,13 +616,18 @@ runHybridTradingLoop(mode) {
 | Mode | Pairs | Deskripsi |
 |------|-------|-----------|
 | `VIP` | 17 pairs | Major crypto: BTC, ETH, ASTER, BNB, XRP, ZEC, XLM, SUI, TON, BCH, LINK, ADA, AVAX, LTC, TRX, ETC, HYPE |
-| `HOT50` | Top 50 | Diurutkan berdasarkan 24h volume tertinggi |
+| `HOT5` | Top 5 | Top 5 berdasarkan 24h volume tertinggi |
+| `HOT20` | Rank 6-20 | Mid-cap teratas (peringkat volume 6–20) |
+| `HOT40` | Rank 21-40 | Mid-cap menengah (peringkat volume 21–40) |
+| `HOT60` | Rank 41-60 | Small-cap teratas (peringkat volume 41–60) |
+| `HOT80` | Rank 61-80 | Small-cap menengah (peringkat volume 61–80) |
+| `HOT100` | Rank 81-100 | Micro-cap (peringkat volume 81–100, fallback default) |
 | `ALL` | Semua | Seluruh pasangan di Bitget USDT-FUTURES |
 
 **Engine Features:**
 - **Real-time Trinity Pulse** — Visual tracking Z-Score + Hurst + Regime setiap pair di terminal (`\r` overwrite)
 - **Trinity-First, AI-Second** — QuantEngine Trinity (milidetik) → Gemma AI (detik) hanya jika Trinity signal aktif
-- **Smart Safety Block** — Khusus block hanya untuk `Blocked: Safety` (bukan max positions), wait 10s
+- **Smart Safety Block** — Block untuk `Blocked: Safety` DAN `Blocked: Max positions`, wait 10s
 - **Tactical Strike/Veto** — Logging eksplisit untuk setiap keputusan (konfirmasi atau tolak)
 - **API-Friendly** — Micro-delay 50ms antar pair evaluation
 
@@ -775,11 +785,10 @@ npm run dev
 | `BITGET_BASE_URL` | Base URL Bitget API | `https://api.bitget.com` |
 | `TRADING_MODE` | Mode trading: `PAPER` (simulasi) atau `LIVE` | `PAPER` |
 | `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `1` |
-| `MAX_TRADE_ALLOCATION` | Persentase balance per trade (0.0-1.0) | `0.20` (20%) |
+| `MAX_TRADE_ALLOCATION` | Persentase balance per trade (0.0-1.0) | `0.25` (25%) |
 | `MIN_TPSL_NOTIONAL` | Minimum notional agar SL/TP bisa terpasang (USDT) | `10` |
 | `TRADING_STRATEGY` | Strategi trading: `SCALPING` / `INTRADAY` / `SWING` | `INTRADAY` |
-| `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT50` / `ALL` | `VIP` |
-| `BACKTEST_ITERATIONS` | Jumlah iterasi backtesting | `5` |
+| `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT5` / `HOT20` / `HOT40` / `HOT60` / `HOT80` / `HOT100` / `ALL` | `VIP` |
 
 ---
 
@@ -795,7 +804,7 @@ npm run dev
 - [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, atomic SL/TP)
 - [x] **PAPER Mode Position Isolation** (mock positions dari session trades, bukan exchange riil)
 - [x] **LIVE Mode Position Isolation** (filter posisi by session trades)
-- [x] **Scan Mode System** (VIP / HOT50 / ALL)
+- [x] **Scan Mode System** (VIP / HOT5 / HOT20 / HOT40 / HOT60 / HOT80 / HOT100 / ALL — granular volume tiers)
 - [x] **Real-time Trinity Pulse** (Z-Score + Hurst + Regime terminal visualization)
 - [x] AI Decision Engine dengan Gemma 4
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
