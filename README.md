@@ -142,7 +142,7 @@ hyper-gemma-ai-trader/
 │   │   │   ├── indicator-engine.ts  # Kalkulator indikator teknikal (EMA, RSI, ATR)
 │   │   │   └── market-regime.ts     # Deteksi regime market (Trending/Ranging/Volatile)
 │   │   └── risk/
-│   │       ├── risk-manager.ts      # Validasi risiko & leverage cap
+│   │       ├── risk-manager.ts      # Validasi risiko, leverage cap & staged allocation
 │   │       └── cooldown-manager.ts  # Sistem cooldown setelah loss
 │   ├── exchange/
 │   │   ├── bitget.client.ts         # Client API Bitget V2 (HMAC-SHA256 signature)
@@ -151,12 +151,12 @@ hyper-gemma-ai-trader/
 │   ├── database/
 │   │   ├── mongo.ts                 # Koneksi MongoDB
 │   │   ├── models/
-│   │   │   ├── trade.model.ts       # Schema trade (Mongoose)
+│   │   │   ├── trade.model.ts       # Schema trade + lifecycle (entry, exit, PnL, result)
 │   │   │   ├── memory.model.ts      # Schema memory/pelajaran
 │   │   │   ├── session.model.ts     # Schema sesi trading
 │   │   │   └── directive.model.ts   # Schema Battle Directive (Mongoose)
 │   │   └── repositories/
-│   │       ├── trade.repository.ts  # Repository akses data trade
+│   │       ├── trade.repository.ts  # Repository trade (CRUD + open/close + pair analytics)
 │   │       ├── memory.repository.ts # Repository akses data memory
 │   │       ├── session.repository.ts # Repository akses data session
 │   │       └── directive.repository.ts # Repository akses Battle Directive
@@ -371,11 +371,17 @@ Mengklasifikasikan kondisi market saat ini berdasarkan indikator:
 
 Layer perlindungan modal yang dapat meng-override keputusan AI:
 
-- **Dynamic Max Positions** — Membatasi jumlah posisi aktif berdasarkan `MAX_POSITIONS` di environment (default: 2, configurable)
+- **Dynamic Max Positions** — Membatasi jumlah posisi aktif berdasarkan `MAX_POSITIONS` di environment (default: 1, configurable)
 - **Duplicate Position Block** — Memblokir pembukaan posisi baru pada koin yang sudah dipegang (type-safe: `decision.symbol`)
 - **Strategy-Dynamic Liquidation Safety** — Threshold likuidasi berbeda per strategi:
   - `SCALPING` → 15% jarak minimum ke harga likuidasi (lebih toleran karena leverage tinggi)
   - `INTRADAY/SWING` → 30% jarak minimum (lebih konservatif)
+- **Staged Allocation** — Ukuran posisi ditentukan berdasarkan tingkat kepercayaan AI:
+  - Formula: `max_risk = (100% / MAX_CONSECUTIVE_LOSS) / 2`
+  - `HIGH` confidence → 100% dari max_risk
+  - `MEDIUM` confidence → 60% dari max_risk
+  - `LOW` confidence → 20% dari max_risk
+  - Hard cap oleh `MAX_TRADE_ALLOCATION` (default: 25%)
 - **Leverage Cap** — Membatasi leverage hingga maksimal 500x
 - **Silent Pre-Scan** — Log validasi disuprekan untuk `PRE_SCAN_CHECK` (mengurangi noise log)
 - **Position Sizing** — Kalkulasi ukuran posisi berdasarkan tingkat risiko:
@@ -414,6 +420,8 @@ Client lengkap untuk Bitget Futures API V2 dengan autentikasi HMAC-SHA256:
 | **Get Account Balance** | Mengambil saldo akun (USDT-FUTURES) |
 | **Get Positions** | Mengambil posisi-posisi aktif |
 | **Get Symbol Info** | Mengambil `quantityPrecision`, `pricePrecision`, `maxLeverage`, dan `minTradeUSDT` per simbol |
+| **Get Exchange Info** | Mengambil seluruh daftar kontrak (untuk deteksi RWA/saham) |
+| **Get Fill History** | Mengambil riwayat fill per simbol untuk deteksi trade close otomatis |
 | **Place Order** | Membuat market/limit order dengan **Atomic SL/TP** (`presetStopLossPrice` + `presetTakeProfitPrice`) |
 | **Place TPSL Order** | Membuat TP/SL order terpisah via `place-tpsl-order` (planType: `profit_plan`/`loss_plan`, holdSide) |
 | **Set Leverage** | Mengatur leverage per simbol (PAPER mode: simulated) |
@@ -468,10 +476,10 @@ Aggregator data market yang menggabungkan raw data dari Bitget dengan indikator 
 Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 
 - **Dynamic Notional Sizing** — Ukuran order ditentukan oleh formula:
-  - `TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance × MAX_TRADE_ALLOCATION)`
+  - `TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance × staged_allocation)`
+  - `staged_allocation` dihitung oleh `riskManager.getStagedAllocation()` berdasarkan confidence AI
   - `SAFETY_FLOOR = max(symbolInfo.minTradeUSDT, MIN_TPSL_NOTIONAL, 5.5)` — memastikan notional cukup besar untuk SL/TP placement
   - `MIN_TPSL_NOTIONAL` dikonfigurasi via environment (default: 10 USDT)
-  - `MAX_TRADE_ALLOCATION` dikonfigurasi via environment (default: 20% dari balance)
 - **Dynamic Quantity** — Menghitung kuantitas: `ceil(TARGET_NOTIONAL / price)` dengan presisi simbol
 - **Exchange-Aware Leverage** — Mengambil `maxLeverage` langsung dari kontrak Bitget per simbol
 - **Auto-Leverage Optimization** — Menaikkan leverage otomatis jika saran AI terlalu rendah:
@@ -483,8 +491,7 @@ Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 - **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
 - **Atomic SL/TP (Preset)** — SL/TP dikirim **dalam request yang sama** dengan market order (bukan Plan Order terpisah):
   - `presetStopLossPrice` + `presetTakeProfitPrice` dimasukkan ke body `place-order`
-  - `SCALPING/INTRADAY` → SL 1.5%, TP 2.5% (RR ~1:1.67)
-  - `SWING` → SL 3%, TP 10% (RR 1:3.3)
+  - Semua strategi: SL 1.5%, TP 2.5% (RR ~1:1.67)
   - **Benefit:** SL/TP dijamin terpasang, tidak ada race condition atau partial fill
 
 ---
@@ -510,10 +517,36 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 
 | Model | File | Deskripsi |
 |-------|------|-----------|
-| **Trade** | `trade.model.ts` | Setiap trade yang dieksekusi (pair, action, PnL, ai_reasoning) |
+| **Trade** | `trade.model.ts` | Trade lifecycle lengkap (entry, exit, PnL, result, exit_reason, fees) |
 | **Memory** | `memory.model.ts` | Pelajaran dari kesalahan (kategori, severity, occurrence) |
 | **Session** | `session.model.ts` | Sesi trading (mode, start/end time, total trades) |
-| **BattleDirective** | `directive.model.ts` | **[NEW]** Perintah strategi makro dari Gemma (bias, threshold, leverage) |
+| **BattleDirective** | `directive.model.ts` | Perintah strategi makro dari Gemma (bias, threshold, leverage) |
+
+#### Trade Lifecycle Schema
+
+```typescript
+{
+  // Entry
+  pair: string,
+  action: TradeAction,       // LONG | SHORT
+  entry_price: number,
+  leverage: number,
+  confidence_score: number,
+
+  // Exit (auto-populated via fill history detection)
+  exit_price?: number,
+  realized_pnl?: number,
+  result?: TradeResult,      // WIN | LOSS | BREAKEVEN
+  exit_reason?: TradeExitReason,  // TP_HIT | SL_HIT | MANUAL_OR_UNKNOWN
+  closed_at?: Date,
+  fees?: number,
+
+  // AI Context
+  ai_reasoning: string,
+  self_reflection?: string,
+  market_regime: MarketRegime
+}
+```
 
 #### BattleDirective Schema
 
@@ -529,10 +562,10 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 ```
 
 #### Repositories
-- `trade.repository.ts` — CRUD untuk trade records
+- `trade.repository.ts` — CRUD untuk trade records + `findOpenTrades()` + `closeTradeRecord()` + `aggregatePairPerformance()` (win rate, PnL ratio, composite score)
 - `memory.repository.ts` — Upsert pelajaran trading
 - `session.repository.ts` — Lifecycle management sesi
-- `directive.repository.ts` — **[NEW]** `getLatest()` dan `update()` untuk Battle Directive (upsert single document)
+- `directive.repository.ts` — `getLatest()` dan `update()` untuk Battle Directive (upsert single document)
 
 ---
 
@@ -580,18 +613,21 @@ runHybridTradingLoop(mode) {
   1. Strategy Governor: Refresh Battle Directive (initial)
 
   while (true) {
-    2. Cek Account & Risk Status
-       - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 10s → Retry
-    3. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
+     2. Auto-Close Detection (setiap cycle):
+        - Cek open trades di DB vs live positions di exchange
+        - Jika posisi hilang → fetch fill history → record PnL, exit_price, result, fees
+        - Log: [TRADE CLOSED] BTCUSDT LONG → TP_HIT | PnL: +0.52 USDT
+     3. Cek Account & Risk Status
+        - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 10s → Retry
+     4. Determine Pairs to Scan:
+        - SINGLE MODE: Hanya `FOCUS_PAIR`
+        - MULTI MODE: Fetch tickers → Filter RWA blacklist → Apply SCAN_MODE
+     5. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
        - VIP: 17 major pairs (BTC, ETH, BNB, XRP, SUI, TON, dll)
        - HOT5: Top 5 by volume
        - HOT20: Rank 6-20 by volume
        - HOT40: Rank 21-40 by volume
        - HOT60: Rank 41-60 by volume
-       - HOT80: Rank 61-80 by volume
-       - HOT100 (default): Rank 81-100 by volume
-       - ALL: Seluruh market
-    4. Loop setiap hot pair:
        a. 📊 TRINITY SENSOR (Instant, 100 candles):
           - Ambil OHLCV history → Hitung Z-Score (20 candle) + Hurst (100 candle) + VWAP
           - Determine regime: Hurst >= threshold → TRENDING, else → RANGING
@@ -604,8 +640,8 @@ runHybridTradingLoop(mode) {
            - GEMMA_FLIP_BLOCKED guard menggunakan mathDir dari step (a)
            - Jika LONG/SHORT → TACTICAL STRIKE → Execute (Atomic SL/TP)
            - Jika SKIP/WAIT → TACTICAL VETO → Skip
-       c. ⏱️ Micro-delay 50ms antar pair
-    5. Wait 1s → Ulang dari step 2
+        c. ⏱️ Micro-delay 250ms antar pair
+     6. Wait 10s → Ulang dari step 2
     * On crash → Wait 5s → Retry
   }
 }
@@ -616,6 +652,7 @@ runHybridTradingLoop(mode) {
 | Mode | Pairs | Deskripsi |
 |------|-------|-----------|
 | `VIP` | 17 pairs | Major crypto: BTC, ETH, ASTER, BNB, XRP, ZEC, XLM, SUI, TON, BCH, LINK, ADA, AVAX, LTC, TRX, ETC, HYPE |
+| `TOP20` | Top 20 | Top 20 berdasarkan 24h volume (termasuk RWA-filtered) |
 | `HOT5` | Top 5 | Top 5 berdasarkan 24h volume tertinggi |
 | `HOT20` | Rank 6-20 | Mid-cap teratas (peringkat volume 6–20) |
 | `HOT40` | Rank 21-40 | Mid-cap menengah (peringkat volume 21–40) |
@@ -628,8 +665,11 @@ runHybridTradingLoop(mode) {
 - **Real-time Trinity Pulse** — Visual tracking Z-Score + Hurst + Regime setiap pair di terminal (`\r` overwrite)
 - **Trinity-First, AI-Second** — QuantEngine Trinity (milidetik) → Gemma AI (detik) hanya jika Trinity signal aktif
 - **Smart Safety Block** — Block untuk `Blocked: Safety` DAN `Blocked: Max positions`, wait 10s
+- **Auto-Close Detection** — Setiap cycle, cek open trades vs live positions → auto-record PnL, result, exit_reason via fill history
+- **RWA Blacklist** — Otomatis filter saham/komoditas (isRwa) dari scan, hanya crypto murni yang di-scan
+- **Single Pair Mode** — `TRADING_MODE_PAIR=SINGLE` + `FOCUS_PAIR` untuk fokus satu koin saja
 - **Tactical Strike/Veto** — Logging eksplisit untuk setiap keputusan (konfirmasi atau tolak)
-- **API-Friendly** — Micro-delay 50ms antar pair evaluation
+- **API-Friendly** — Micro-delay 250ms antar pair, 10s antar cycle
 
 ---
 
@@ -785,10 +825,13 @@ npm run dev
 | `BITGET_BASE_URL` | Base URL Bitget API | `https://api.bitget.com` |
 | `TRADING_MODE` | Mode trading: `PAPER` (simulasi) atau `LIVE` | `PAPER` |
 | `MAX_POSITIONS` | Jumlah maksimal posisi aktif bersamaan | `1` |
-| `MAX_TRADE_ALLOCATION` | Persentase balance per trade (0.0-1.0) | `0.25` (25%) |
+| `MAX_TRADE_ALLOCATION` | Hard cap persentase balance per trade (0.0-1.0) | `0.25` (25%) |
+| `MAX_CONSECUTIVE_LOSS` | Jumlah loss beruntun sebelum allocation minimum | `10` |
 | `MIN_TPSL_NOTIONAL` | Minimum notional agar SL/TP bisa terpasang (USDT) | `10` |
 | `TRADING_STRATEGY` | Strategi trading: `SCALPING` / `INTRADAY` / `SWING` | `INTRADAY` |
-| `SCAN_MODE` | Mode pemindaian market: `VIP` / `HOT5` / `HOT20` / `HOT40` / `HOT60` / `HOT80` / `HOT100` / `ALL` | `VIP` |
+| `SCAN_MODE` | Mode pemindaian market: `VIP` / `TOP20` / `HOT5` / `HOT20` / `HOT40` / `HOT60` / `HOT80` / `HOT100` / `ALL` | `VIP` |
+| `TRADING_MODE_PAIR` | Mode pair: `SINGLE` (satu koin) atau `MULTI` (scan banyak) | `MULTI` |
+| `FOCUS_PAIR` | Koin fokus saat `TRADING_MODE_PAIR=SINGLE` (e.g. `BTCUSDT`) | — (wajib jika SINGLE) |
 
 ---
 
@@ -804,12 +847,13 @@ npm run dev
 - [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, atomic SL/TP)
 - [x] **PAPER Mode Position Isolation** (mock positions dari session trades, bukan exchange riil)
 - [x] **LIVE Mode Position Isolation** (filter posisi by session trades)
-- [x] **Scan Mode System** (VIP / HOT5 / HOT20 / HOT40 / HOT60 / HOT80 / HOT100 / ALL — granular volume tiers)
+- [x] **Scan Mode System** (VIP / TOP20 / HOT5 / HOT20 / HOT40 / HOT60 / HOT80 / HOT100 / ALL — granular volume tiers + RWA filter)
 - [x] **Real-time Trinity Pulse** (Z-Score + Hurst + Regime terminal visualization)
 - [x] AI Decision Engine dengan Gemma 4
 - [x] **Trading Strategy System** (SCALPING / INTRADAY / SWING)
 - [x] **Auto-Leverage Optimization** (auto-increase + exchange-aware cap)
-- [x] **Dynamic Notional Sizing** (MAX_TRADE_ALLOCATION + minTradeUSDT + MIN_TPSL_NOTIONAL safety floor)
+- [x] **Staged Allocation** (confidence-based sizing: HIGH/MEDIUM/LOW × MAX_CONSECUTIVE_LOSS formula)
+- [x] **Dynamic Notional Sizing** (staged_allocation + minTradeUSDT + MIN_TPSL_NOTIONAL safety floor)
 - [x] **Atomic SL/TP** (preset params dalam request market order, bukan plan order terpisah)
 - [x] **TPSL Order Support** (`place-tpsl-order` endpoint dengan holdSide + planType)
 - [x] **trioDirection Passthrough** (QuantEngine → server.ts → DecisionEngine — single source of truth)
@@ -838,6 +882,10 @@ npm run dev
 - [x] **Clean Error Logging** (axios error message only, bukan full object)
 - [x] **Hurst-Adaptive Strategy Selection** (SCALPING H>=0.50, INTRADAY H>=0.60 — inclusive)
 - [x] **VWAP Value/Premium Area Detection** (daily reset 00:00 UTC)
+- [x] **Trade Lifecycle Tracking** (auto-detect closed positions via Bitget fill history → record exit_price, realized_pnl, result, fees)
+- [x] **Single Pair Mode** (`TRADING_MODE_PAIR=SINGLE` + `FOCUS_PAIR` untuk fokus satu koin)
+- [x] **RWA Blacklist** (otomatis filter saham/komoditas dari scan menggunakan `getExchangeInfo().isRwa`)
+- [x] **Pair Performance Analytics** (aggregatePairPerformance: win rate, avg PnL, PnL ratio, composite score per pair)
 
 ### 🔜 Rencana Pengembangan
 - [ ] **Volatility Spike Detector** — Filter event-driven moves (change24h > 10% + volume spike > 3x average) menggunakan data MarketData yang sudah ada. Mencegah entry saat pump/dump ekstrem yang tidak diprediksi oleh Trio.
