@@ -115,6 +115,7 @@ export class QuantEngine {
       decision: {
         symbol,
         decision,
+        confidence: 'LOW',
         confidence_score: confidence,
         market_regime: isTrending ? MarketRegime.TRENDING : MarketRegime.VOLATILE,
         risk_level: RiskLevel.MEDIUM,
