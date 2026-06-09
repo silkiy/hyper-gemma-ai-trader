@@ -212,6 +212,43 @@ export class BitgetClient {
     }
   }
 
+  async getFillHistory(symbol: string, limit: number = 20) {
+    const timestamp = this.getTimestamp();
+    // The fills endpoint accepts the plain symbol without the _UMCBL suffix
+    const formattedSymbol = symbol.toUpperCase();
+    const requestPath = `/api/v2/mix/order/fills?symbol=${formattedSymbol}&productType=USDT-FUTURES&limit=${limit}`;
+    const signature = this.generateSignature(timestamp, 'GET', requestPath);
+
+    try {
+      const response = await axios.get(`${this.baseUrl}${requestPath}`, {
+        headers: this.getHeaders(timestamp, signature)
+      });
+      if (response.data.code !== '00000') throw new Error(response.data.msg);
+      return response.data.data;
+    } catch (error: any) {
+      const msg = error.response?.data?.msg || error.message;
+      // Silently skip if symbol doesn't exist on Bitget to avoid log spam
+      if (msg?.includes('Parameter does not exist')) {
+        return [];
+      }
+      logger.error({ symbol, error: msg }, 'Failed to fetch Bitget V2 fill history');
+      throw error;
+    }
+  }
+
+  async getExchangeInfo() {
+    const requestPath = '/api/v2/mix/market/contracts?symbol=&productType=USDT-FUTURES';
+    try {
+      const response = await axios.get(`${this.baseUrl}${requestPath}`);
+      if (response.data.code !== '00000') throw new Error(response.data.msg);
+      return response.data.data;
+    } catch (error: any) {
+      const msg = error.response?.data?.msg || error.message;
+      logger.error({ error: msg }, 'Failed to fetch Bitget V2 exchange info');
+      throw error;
+    }
+  }
+
   async getSymbolInfo(symbol: string): Promise<{ quantityPrecision: number; pricePrecision: number; maxLeverage: number, minTradeUSDT: number }> {
     const formattedSymbol = this.formatSymbol(symbol);
     const requestPath = `/api/v2/mix/market/contracts?symbol=${formattedSymbol}&productType=USDT-FUTURES`;
