@@ -96,6 +96,7 @@ export class DecisionEngine {
   private getFallbackDecision(reason: string): AIDecision {
     return {
       decision: TradeAction.SKIP,
+      confidence: 'LOW',
       confidence_score: 0,
       market_regime: MarketRegime.UNCLEAR,
       risk_level: RiskLevel.HIGH,
