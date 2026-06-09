@@ -80,6 +80,33 @@ export class RiskManager {
     return decision;
   }
 
+  /**
+   * Calculates the allowed allocation percentage based on AI confidence.
+   * Formula: max_risk = (100% / MAX_CONSECUTIVE_LOSS) / 2
+   * HIGH: 100% of max_risk
+   * MEDIUM: 60% of max_risk
+   * LOW: 20% of max_risk
+   * env.MAX_TRADE_ALLOCATION is the absolute hard cap.
+   */
+  getStagedAllocation(decision: AIDecision): number {
+    const maxConsecutiveLoss = env.MAX_CONSECUTIVE_LOSS || 10;
+    const maxRiskBase = (1.0 / maxConsecutiveLoss) / 2; // e.g., (1.0 / 10) / 2 = 0.05 (5%)
+
+    // Fallback if confidence is missing
+    if (!decision.confidence) {
+      return env.MAX_TRADE_ALLOCATION;
+    }
+
+    let multiplier = 0.2; // LOW
+    if (decision.confidence === 'HIGH') multiplier = 1.0;
+    else if (decision.confidence === 'MEDIUM') multiplier = 0.6;
+
+    const calculatedAllocation = maxRiskBase * multiplier;
+
+    // Return minimum of calculated or hard cap
+    return Math.min(calculatedAllocation, env.MAX_TRADE_ALLOCATION);
+  }
+
   calculatePositionSize(equity: number, positionSize: PositionSize): number {
     // Leave 80% of equity as buffer for fees and unrealized PnL
     const safeMargin = equity * (this.maxRiskPerTradePercent / 100);

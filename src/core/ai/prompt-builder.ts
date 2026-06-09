@@ -42,6 +42,10 @@ export class PromptBuilder {
       1. WAJIB Risk-to-Reward Ratio (RRR) minimal 1:1.5.
       2. KHUSUS AKUN MIKRO: Gunakan Leverage tinggi (rata kanan) agar bisa masuk ke minimum order bursa ($5).
       3. Anda wajib memberikan target SL/TP dalam % pergerakan harga koin yang sangat ketat.
+      4. Assess "confidence" level:
+         - HIGH: Semua indikator selaras (Hurst + Z-Score + VWAP + regime) menunjuk ke arah yang sama + RR sangat baik.
+         - MEDIUM: Sebagian besar indikator selaras, 1-2 indikator bersifat campuran atau netral.
+         - LOW: Sinyal lemah atau ada indikator yang bertentangan tapi entri masih dianggap valid secara taktis.
       ATURAN: Jawab HANYA dalam format JSON valid tanpa teks penjelasan.
     `;
 
@@ -63,6 +67,7 @@ export class PromptBuilder {
       SCHEMA:
       {
         "decision": "LONG|SHORT|WAIT|SKIP",
+        "confidence": "LOW|MEDIUM|HIGH",
         "confidence_score": 0-100,
         "market_regime": "TRENDING|RANGING|VOLATILE|UNCLEAR",
         "risk_level": "LOW|MEDIUM|HIGH",

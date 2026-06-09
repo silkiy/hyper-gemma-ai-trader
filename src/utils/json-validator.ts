@@ -9,6 +9,7 @@ export const AIDecisionSchema = z.object({
     if (['LONG', 'SHORT', 'WAIT', 'SKIP'].includes(s)) return s;
     return 'SKIP';
   }, z.nativeEnum(TradeAction)),
+  confidence: z.enum(['LOW', 'MEDIUM', 'HIGH']),
   confidence_score: z.number().min(0).max(100),
   market_regime: z.preprocess((val: any) => {
     const s = String(val).toUpperCase();

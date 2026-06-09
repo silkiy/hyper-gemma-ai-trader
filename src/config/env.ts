@@ -12,18 +12,30 @@ const envSchema = z.object({
   BITGET_BASE_URL: z.string().url().default('https://api.bitget.com'),
 
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
-  OLLAMA_MODEL: z.string().default('gemma:7b-instruct'),
+  OLLAMA_MODEL: z.string().default('gemma4:latest'),
   MOCK_AI: z.string().default('false').transform(v => v === 'true'),
   TRADING_PAIR: z.string().default('ETH/USDC'),
   WALLET_ADDRESS: z.string().optional(),
   HYPERLIQUID_TESTNET: z.string().default('true').transform(v => v !== 'false'),
   PORT: z.string().default('3000').transform(Number),
   MAX_POSITIONS: z.string().default('1').transform(Number),
-  MAX_TRADE_ALLOCATION: z.string().default('0.25').transform(Number), // Default 20% of balance
+  MAX_CONSECUTIVE_LOSS: z.string().default('10').transform(Number),
+  MAX_TRADE_ALLOCATION: z.string().default('0.25').transform(Number), // Default 25%
   MIN_TPSL_NOTIONAL: z.string().default('10').transform(Number), // Default 10 USDT for SL/TP
   TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
-  SCAN_MODE: z.enum(['VIP','HOT5' ,'HOT20', 'HOT40','HOT60','HOT80','HOT100', 'ALL']).default('VIP'),
+  SCAN_MODE: z.enum(['VIP','TOP20', 'HOT5', 'HOT20', 'HOT40', 'HOT60', 'HOT80', 'HOT100','ALL']).default('VIP'),
   TRADING_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
-});
+  TRADING_MODE_PAIR: z.enum(['SINGLE', 'MULTI']).default('MULTI'),
+  FOCUS_PAIR: z.string().optional(),
+  }).refine(data => {
+  if (data.TRADING_MODE_PAIR === 'SINGLE' && !data.FOCUS_PAIR) {
+    return false;
+  }
+  return true;
+  }, {
+  message: "FOCUS_PAIR is required when TRADING_MODE_PAIR is set to SINGLE",
+  path: ["FOCUS_PAIR"]
+  });
 
-export const env = envSchema.parse(process.env);
+  export const env = envSchema.parse(process.env);
+

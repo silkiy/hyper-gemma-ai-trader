@@ -4,10 +4,9 @@ import { logger } from '../utils/logger.js';
 import { TradeAction } from '../types/enum.types.js';
 import { marketDataProvider } from './market-data.provider.js';
 import { env } from '../config/env.js';
+import { riskManager } from '../core/risk/risk-manager.js';
 
 export class OrderExecutor {
-  private readonly MIN_NOTIONAL = 5.1; 
-
   async executeOrder(decision: AIDecision, symbol: string): Promise<{ orderId: string; status: string; price: number }> {
     logger.info({ 
       action: decision.decision, 
@@ -32,9 +31,8 @@ export class OrderExecutor {
       // 3. AUTO-LEVERAGE OPTIMIZATION & NOTIONAL SIZING
       const available = accountStatus.available_balance || 0;
       
-      // TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance * MAX_TRADE_ALLOCATION)
-      const maxTradeAllocation = env.MAX_TRADE_ALLOCATION; 
-      const targetNotional = Math.max(minBitgetNotional, available * maxTradeAllocation);
+      // TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance * staged_allocation)
+      const targetNotional = Math.max(minBitgetNotional, available * riskManager.getStagedAllocation(decision));
 
       // Calculate minimum leverage needed to afford this targetNotional
       const minNeededLeverage = Math.ceil(targetNotional / (available * 0.98)); 
@@ -70,14 +68,9 @@ export class OrderExecutor {
       await bitgetClient.setLeverage(symbol, finalLeverage);
 
       // 5. Calculate SL/TP Prices BEFORE opening position
-      let slPercent = 0.015; 
-      let tpPercent = 0.025; 
-
-      const strategy = env.TRADING_STRATEGY;
-      if (strategy === 'SWING') {
-        slPercent = 0.03;
-        tpPercent = 0.10;
-      }
+      // REVERTED: Using baseline 1.5% SL and 2.5% TP (RR 1:1.66)
+      const slPercent = 0.015; 
+      const tpPercent = 0.025; 
 
       const side: 'buy' | 'sell' = decision.decision === TradeAction.LONG ? 'buy' : 'sell';
       const slPrice = side === 'buy' ? price * (1 - slPercent) : price * (1 + slPercent);
