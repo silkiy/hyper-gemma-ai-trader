@@ -22,6 +22,12 @@ const envSchema = z.object({
   MAX_CONSECUTIVE_LOSS: z.string().default('10').transform(Number),
   MAX_TRADE_ALLOCATION: z.string().default('0.25').transform(Number), // Default 25%
   MIN_TPSL_NOTIONAL: z.string().default('10').transform(Number), // Default 10 USDT for SL/TP
+  
+  // Issue #3: Pure Quant Mode & Momentum Filter
+  QUANT_ONLY_MODE: z.string().default('false').transform(v => v === 'true'),
+  MIN_PRICE_CHANGE_24H: z.string().default('40').transform(Number), // 40% absolute change
+  MIN_VOLUME_MULTIPLIER: z.string().default('1.5').transform(Number), // 1.5x avg volume
+
   TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
   SCAN_MODE: z.enum(['VIP','TOP20', 'HOT5', 'HOT20', 'HOT40', 'HOT60', 'HOT80', 'HOT100','ALL']).default('VIP'),
   TRADING_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
@@ -38,4 +44,3 @@ const envSchema = z.object({
   });
 
   export const env = envSchema.parse(process.env);
-

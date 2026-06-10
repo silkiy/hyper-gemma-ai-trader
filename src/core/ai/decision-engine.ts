@@ -12,8 +12,34 @@ import { SessionMode, TradeAction, MarketRegime, RiskLevel, PositionSize } from 
 import { formatCompactNumber } from '../../utils/helpers.js';
 
 export class DecisionEngine {
-  async evaluateTrade(pair: string, currentMode: SessionMode, mathDir: 'LONG' | 'SHORT' | 'NEUTRAL'): Promise<AIDecision> {
+  async evaluateTrade(
+    pair: string, 
+    currentMode: SessionMode, 
+    mathDir: 'LONG' | 'SHORT' | 'NEUTRAL',
+    quantMetrics?: { zScore: number, hurst: number, vwapDev: number, regime: string, leverage: number }
+  ): Promise<AIDecision> {
     try {
+      // FIX: QUANT_ONLY_MODE Bypass
+      if (env.QUANT_ONLY_MODE && quantMetrics) {
+        logger.info({ pair, mathDir }, '⚡ QUANT_ONLY_MODE active — Gemma AI bypassed');
+        return {
+          symbol: pair,
+          decision: mathDir === 'NEUTRAL' ? TradeAction.SKIP : (mathDir as unknown as TradeAction),
+          confidence: 'MEDIUM',
+          confidence_score: 80,
+          market_regime: quantMetrics.regime === 'TRENDING' ? MarketRegime.TRENDING : MarketRegime.VOLATILE,
+          risk_level: RiskLevel.MEDIUM,
+          leverage_suggestion: quantMetrics.leverage,
+          position_size: PositionSize.NORMAL,
+          entry_reason: `Pure Quant: Z=${quantMetrics.zScore.toFixed(2)} H=${quantMetrics.hurst.toFixed(2)} VWAP=${quantMetrics.vwapDev.toFixed(2)}%`,
+          risk_factors: ['QUANT_ONLY_MODE active — no AI validation'],
+          stop_loss_logic: 'ATR-based (Preset)',
+          take_profit_logic: 'Fixed RR (Preset)',
+          self_reflection: '-',
+          final_summary: `Pure Quant Strike: Direction ${mathDir}`
+        } as AIDecision;
+      }
+
       logger.info({ pair, mathDir }, 'Starting trade evaluation');
 
       // 1. Fetch Market Data

@@ -10,6 +10,7 @@ import {
   TradeExitReason,
 } from "./types/enum.types.js";
 import { riskManager } from "./core/risk/risk-manager.js";
+import { cooldownManager } from "./core/risk/cooldown-manager.js";
 import { startMonitoringApi } from "./api/monitoring-api.js";
 import { tradeService } from "./services/trade.service.js";
 import { tradeRepository } from "./database/repositories/trade.repository.js";
@@ -112,6 +113,14 @@ async function runHybridTradingLoop(mode: SessionMode) {
   // 2. High-Speed Loop with Tactical AI Confirmation
   while (true) {
     try {
+      // --- COOLDOWN CHECK ---
+      if (cooldownManager.isCooldownActive()) {
+        const remaining = Math.ceil(cooldownManager.getRemainingMinutes());
+        process.stdout.write(`\r[SAFETY] System is in COOLDOWN mode. Remaining: ${remaining} min...      `);
+        await new Promise((resolve) => setTimeout(resolve, 30000)); // Check every 30s
+        continue;
+      }
+
       const accountStatus = await marketDataProvider.getAccountStatus();
 
       // --- TASK 5B: Detect Closed Positions ---
@@ -170,6 +179,29 @@ async function runHybridTradingLoop(mode: SessionMode) {
                   },
                   `[TRADE CLOSED] ${trade.pair} ${trade.action} → ${exitReason} | PnL: ${realizedPnl > 0 ? "+" : ""}${realizedPnl} USDT`,
                 );
+
+                // Start 30 min cooldown for this specific pair
+                cooldownManager.startPairCooldown(trade.pair, 30);
+
+                // Update session stats
+                await sessionService.handleTradeClosed(
+                  realizedPnl,
+                  result === TradeResult.WIN,
+                  accountStatus.current_equity
+                );
+
+                // Check for safety cooldown on LOSS
+                if (result === TradeResult.LOSS) {
+                  const streak = await tradeRepository.getConsecutiveLossStreak();
+                  const maxLoss = env.MAX_CONSECUTIVE_LOSS || 10;
+                  if (streak >= maxLoss) {
+                    logger.warn(
+                      { streak, limit: maxLoss },
+                      `[SAFETY] Max consecutive loss reached (${streak}/${maxLoss}). Entering cooldown 60 min.`,
+                    );
+                    cooldownManager.startCooldown(60);
+                  }
+                }
               }
             } catch (fillError) {
               logger.error(
@@ -219,10 +251,24 @@ async function runHybridTradingLoop(mode: SessionMode) {
           .filter((c: any) => c.isRwa === "YES")
           .map((c: any) => c.symbol.replace("_UMCBL", ""));
 
-        // Filter: Only pure crypto tickers
-        const cryptoTickers = allTickers.filter(
-          (t: any) => !rwaSymbols.includes(t.symbol),
-        );
+        // Enhanced Filter: Exclude keywords (STOCK, Gold/Silver, Oil)
+        const blacklistKeywords = ["STOCK", "XAU", "XAG", "CL", "GOLD", "SILVER", "OIL"];
+        
+        // --- MOMENTUM PRE-FILTER ---
+        const cryptoTickers = allTickers.filter((t: any) => {
+          const isRwa = rwaSymbols.includes(t.symbol);
+          const isBlacklisted = blacklistKeywords.some(kw => t.symbol.toUpperCase().includes(kw));
+          
+          // Filter by momentum (24h Price Change)
+          const priceChange = Math.abs(parseFloat(t.priceChangePercent));
+          const hasMomentum = priceChange >= env.MIN_PRICE_CHANGE_24H;
+          
+          return !isRwa && !isBlacklisted && hasMomentum;
+        });
+
+        if (env.QUANT_ONLY_MODE) {
+          logger.info('⚡ QUANT_ONLY_MODE active — Gemma AI bypassed');
+        }
 
         const majorPairs = [
           "BTCUSDT",
@@ -254,66 +300,42 @@ async function runHybridTradingLoop(mode: SessionMode) {
           hotPairs = cryptoTickers.map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "TOP20") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(0, 20)
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "HOT5") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(0, 5)
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "HOT20") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(5, 20)
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "HOT40") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(20, 40)
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "HOT60") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(40, 60)
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "HOT80") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(60, 80)
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "HOT100") {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(80, 100)
             .map((t: any) => t.symbol);
         } else {
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
             .slice(0, 100)
             .map((t: any) => t.symbol);
         }
@@ -324,6 +346,9 @@ async function runHybridTradingLoop(mode: SessionMode) {
         env.TRADING_STRATEGY === TradingStrategy.INTRADAY ? "15m" : "5m";
 
       for (const pair of pairsToScan) {
+        // Skip if this specific pair is in cooldown
+        if (cooldownManager.isPairInCooldown(pair)) continue;
+
         try {
           // Get full OHLCV history for Trinity analysis (100 candles)
           const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, 100);
@@ -334,6 +359,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
             zScore,
             threshold,
             hurst,
+            vwapDev,
             trioDirection: mathDir,
           } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
 
@@ -365,11 +391,18 @@ async function runHybridTradingLoop(mode: SessionMode) {
             );
 
             // 2. AI SNIPER (Gemma confirms the math signal)
-            // Pass mathDir to ensure guard logic is synchronized
+            // Pass mathDir and quantMetrics to ensure guard logic is synchronized
             const tacticalDecision = await decisionEngine.evaluateTrade(
               pair,
               mode,
               mathDir,
+              { 
+                zScore, 
+                hurst, 
+                vwapDev, 
+                regime: hurst >= (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRENDING' : 'RANGING',
+                leverage: quantDecision.leverage_suggestion 
+              }
             );
 
             if (

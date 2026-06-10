@@ -36,10 +36,11 @@ export class QuantEngine {
     zScore: number, 
     threshold: number, 
     hurst: number,
+    vwapDev: number,
     trioDirection: 'LONG' | 'SHORT' | 'NEUTRAL'
   }> {
     const directive = await directiveRepository.getLatest();
-    if (!directive || ohlcv.length < 50) return { decision: null, zScore: 0, threshold: 0, hurst: 0.5, trioDirection: 'NEUTRAL' };
+    if (!directive || ohlcv.length < 50) return { decision: null, zScore: 0, threshold: 0, hurst: 0.5, vwapDev: 0, trioDirection: 'NEUTRAL' };
 
     const prices = ohlcv.map(d => d.c);
     const lastPrice = prices[prices.length - 1]!;
@@ -98,7 +99,7 @@ export class QuantEngine {
       }
     }
 
-    if (decision === TradeAction.SKIP) return { decision: null, zScore, threshold: zThreshold, hurst, trioDirection };
+    if (decision === TradeAction.SKIP) return { decision: null, zScore, threshold: zThreshold, hurst, vwapDev, trioDirection };
 
     const confidence = Math.min(Math.abs(zScore) * 30, 95);
 
@@ -131,6 +132,7 @@ export class QuantEngine {
       zScore,
       threshold: zThreshold,
       hurst,
+      vwapDev,
       trioDirection
     };
   }

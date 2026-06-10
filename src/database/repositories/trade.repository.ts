@@ -18,6 +18,27 @@ export class TradeRepository {
     return await Trade.findByIdAndUpdate(tradeId, { $set: data }, { new: true });
   }
 
+  async getConsecutiveLossStreak(pair?: string): Promise<number> {
+    const query: any = { result: { $exists: true } };
+    if (pair) query.pair = pair;
+
+    // Fetch last 20 closed trades to count consecutive losses
+    const recentTrades = await Trade.find(query)
+      .sort({ closed_at: -1 })
+      .limit(20);
+
+    let streak = 0;
+    for (const trade of recentTrades) {
+      if (trade.result === 'LOSS') {
+        streak++;
+      } else if (trade.result === 'WIN') {
+        break; // Stop at first win
+      }
+      // BREAKEVEN doesn't break nor increase the streak for this purpose
+    }
+    return streak;
+  }
+
   async getStats() {
     return await Trade.aggregate([
       {

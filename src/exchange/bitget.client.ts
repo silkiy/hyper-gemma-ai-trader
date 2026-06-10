@@ -85,7 +85,8 @@ export class BitgetClient {
         symbol: t.symbol.replace('_UMCBL', ''),
         lastPrice: t.lastPr,
         priceChangePercent: (parseFloat(t.change24h || t.changeUtc24h || '0') * 100).toFixed(3),
-        volume: t.usdtVolume || t.quoteVolume || t.baseVolume || '0'
+        volume: t.usdtVolume || t.quoteVolume || t.baseVolume || '0',
+        usdtVolume: t.usdtVolume || '0'
       }));
     } catch (error: any) {
       const msg = error.response?.data?.msg || error.message;

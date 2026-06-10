@@ -5,9 +5,10 @@ import { TradeAction } from '../types/enum.types.js';
 import { marketDataProvider } from './market-data.provider.js';
 import { env } from '../config/env.js';
 import { riskManager } from '../core/risk/risk-manager.js';
+import { cooldownManager } from '../core/risk/cooldown-manager.js';
 
 export class OrderExecutor {
-  async executeOrder(decision: AIDecision, symbol: string): Promise<{ orderId: string; status: string; price: number }> {
+  async executeOrder(decision: AIDecision, symbol: string): Promise<{ orderId: string; status: string; price: number } | null> {
     logger.info({ 
       action: decision.decision, 
       symbol: symbol
@@ -30,9 +31,10 @@ export class OrderExecutor {
 
       // 3. AUTO-LEVERAGE OPTIMIZATION & NOTIONAL SIZING
       const available = accountStatus.available_balance || 0;
+      const stagedAllocation = riskManager.getStagedAllocation(decision);
       
       // TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance * staged_allocation)
-      const targetNotional = Math.max(minBitgetNotional, available * riskManager.getStagedAllocation(decision));
+      const targetNotional = Math.max(minBitgetNotional, available * stagedAllocation);
 
       // Calculate minimum leverage needed to afford this targetNotional
       const minNeededLeverage = Math.ceil(targetNotional / (available * 0.98)); 
@@ -41,14 +43,16 @@ export class OrderExecutor {
       let finalLeverage = Math.max(decision.leverage_suggestion, minNeededLeverage);
       if (finalLeverage > maxExchangeLeverage) finalLeverage = maxExchangeLeverage;
 
-      // Final Affordability Check
+      // --- CRITICAL FIX: RISK CEILING ---
       const marginUsed = targetNotional / finalLeverage;
-      const safeAvailable = available * 0.98; // 2% for safety/fees
+      const maxAllowedMargin = available * env.MAX_TRADE_ALLOCATION;
 
-      if (marginUsed > safeAvailable) {
-        const errorMsg = `CANNOT AFFORD ${symbol}: Needs $${marginUsed.toFixed(4)} margin (Notional: $${targetNotional.toFixed(2)}), have $${available.toFixed(4)}. (Max Lev: ${maxExchangeLeverage}x)`;
-        logger.error(errorMsg);
-        throw new Error(errorMsg);
+      if (marginUsed > maxAllowedMargin) {
+        const msg = `SKIPPED ${symbol}: Margin required ($${marginUsed.toFixed(2)}) exceeds risk limit ($${maxAllowedMargin.toFixed(2)}). Leverage: ${finalLeverage}x, Balance: $${available.toFixed(2)}`;
+        logger.warn(msg);
+        // Trigger short cooldown to stop scanning this unaffordable pair for a while
+        cooldownManager.startPairCooldown(symbol, 15);
+        return null;
       }
 
       // 4. Calculate Quantity based on TARGET_NOTIONAL
@@ -68,7 +72,6 @@ export class OrderExecutor {
       await bitgetClient.setLeverage(symbol, finalLeverage);
 
       // 5. Calculate SL/TP Prices BEFORE opening position
-      // REVERTED: Using baseline 1.5% SL and 2.5% TP (RR 1:1.66)
       const slPercent = 0.015; 
       const tpPercent = 0.025; 
 
@@ -92,13 +95,21 @@ export class OrderExecutor {
         presetTakeProfitPrice: tpPrice.toFixed(pricePrecision)
       });
 
-      const orderId = orderResponse.data.orderId;
-      logger.info({ orderId, leverage: finalLeverage }, 'Order executed ATOMICALLY with SL/TP on Bitget V2');
-      
-      return { orderId, status: 'FILLED', price };
+      if (orderResponse.code === '00000') {
+        const orderId = orderResponse.data.orderId;
+        logger.info({ orderId, leverage: finalLeverage }, 'Order executed ATOMICALLY with SL/TP on Bitget V2');
+        return { orderId, status: 'FILLED', price };
+      }
+
+      throw new Error(orderResponse.msg || 'Unknown Bitget error');
     } catch (error: any) {
-      logger.error({ error: error.message }, 'Bitget V2 Execution Failed');
-      throw error;
+      const msg = error.message || String(error);
+      logger.error({ symbol, error: msg }, 'Bitget V2 Execution Failed');
+      
+      // FAIL-SAFE: Trigger 5-min cooldown on any execution failure to stop spamming
+      cooldownManager.startPairCooldown(symbol, 5);
+      
+      return null;
     }
   }
 }

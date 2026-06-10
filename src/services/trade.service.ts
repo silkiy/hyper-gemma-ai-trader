@@ -13,6 +13,7 @@ export class TradeService {
 
     try {
       const execution = await orderExecutor.executeOrder(decision, pair);
+      if (!execution) return null;
       
       // Save to database
       await tradeRepository.create({

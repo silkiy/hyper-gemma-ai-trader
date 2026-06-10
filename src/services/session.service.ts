@@ -30,6 +30,11 @@ export class SessionService {
       daily_pnl: pnl
     });
   }
+
+  async handleTradeClosed(pnl: number, isWin: boolean, currentEquity: number) {
+    if (!this.currentSessionId) return;
+    await sessionRepository.updateStats(this.currentSessionId, pnl, isWin, currentEquity);
+  }
 }
 
 export const sessionService = new SessionService();
