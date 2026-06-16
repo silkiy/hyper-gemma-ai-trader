@@ -92,6 +92,7 @@ if (process.env.MOCK_AI === 'true') {
   OllamaClient.prototype.generateDecision = async function(prompt: string): Promise<AIDecision> {
     return {
       decision: TradeAction.LONG,
+      confidence: 'LOW',
       confidence_score: 85,
       market_regime: MarketRegime.TRENDING,
       risk_level: RiskLevel.LOW,

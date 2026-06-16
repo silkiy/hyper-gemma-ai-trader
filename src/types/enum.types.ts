@@ -53,3 +53,9 @@ export enum TradeResult {
   LOSS = 'LOSS',
   BREAKEVEN = 'BREAKEVEN',
 }
+
+export enum TradeExitReason {
+  TP_HIT = 'TP_HIT',
+  SL_HIT = 'SL_HIT',
+  MANUAL_OR_UNKNOWN = 'MANUAL_OR_UNKNOWN',
+}

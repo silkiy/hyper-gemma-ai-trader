@@ -70,6 +70,7 @@ export class PromptBuilder {
       SCHEMA:
       {
         "decision": "LONG|SHORT|WAIT|SKIP",
+        "confidence": "LOW|MEDIUM|HIGH",
         "confidence_score": 0-100,
         "market_regime": "TRENDING|RANGING|VOLATILE|UNCLEAR",
         "risk_level": "LOW|MEDIUM|HIGH",

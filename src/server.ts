@@ -23,14 +23,18 @@ const peakPnlMap = new Map<string, number>();
 
 async function displayPortfolioSnapshot(status?: AccountStatus) {
   try {
-    const accountStatus = status || await marketDataProvider.getAccountStatus();
+    const accountStatus =
+      status || (await marketDataProvider.getAccountStatus());
     const activePositions = accountStatus.open_positions || [];
 
-    logger.info({
-      equity: `$${accountStatus.current_equity.toFixed(4)}`,
-      availableBalance: `$${(accountStatus.available_balance ?? 0).toFixed(4)}`,
-      marginBalance: `$${(accountStatus.margin_balance ?? 0).toFixed(4)}`,
-    }, '📊 ACCOUNT SUMMARY');
+    logger.info(
+      {
+        equity: `$${accountStatus.current_equity.toFixed(4)}`,
+        availableBalance: `$${(accountStatus.available_balance ?? 0).toFixed(4)}`,
+        marginBalance: `$${(accountStatus.margin_balance ?? 0).toFixed(4)}`,
+      },
+      "📊 ACCOUNT SUMMARY",
+    );
 
     if (activePositions.length > 0) {
       logger.info({ 
@@ -68,16 +72,16 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
         })
       }, '💰 PORTFOLIO SNAPSHOT');
     } else {
-      logger.info('No active positions to display.');
+      logger.info("No active positions to display.");
     }
   } catch (error) {
-    logger.error({ error }, 'Failed to display portfolio snapshot');
+    logger.error({ error }, "Failed to display portfolio snapshot");
   }
 }
 
 async function runHybridTradingLoop(mode: SessionMode) {
-  logger.info('🚀 HYBRID TACTICAL ENGINE STARTED');
-  
+  logger.info("🚀 HYBRID TACTICAL ENGINE STARTED");
+
   // 1. Initial Strategy Refresh
   await strategyGovernor.refreshDirective();
 
@@ -192,7 +196,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
       
       if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked:')) {
         await displayPortfolioSnapshot(accountStatus);
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        await new Promise((resolve) => setTimeout(resolve, 10000));
         continue;
       }
 
@@ -224,11 +228,113 @@ async function runHybridTradingLoop(mode: SessionMode) {
       } else if (env.SCAN_MODE === 'ALL') {
         hotPairs = allTickers.map((t: any) => t.symbol);
       } else {
-        // Default: HOT50 (Top 50 by volume)
-        hotPairs = allTickers
-          .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
-          .slice(0, 50)
-          .map((t: any) => t.symbol);
+        const allTickers = await bitgetClient.getAllTickers();
+        const exchangeInfo = await bitgetClient.getExchangeInfo();
+
+        // Blacklist RWA (Stocks/Commodities)
+        const rwaSymbols = exchangeInfo
+          .filter((c: any) => c.isRwa === "YES")
+          .map((c: any) => c.symbol.replace("_UMCBL", ""));
+
+        // Filter: Only pure crypto tickers
+        const cryptoTickers = allTickers.filter(
+          (t: any) => !rwaSymbols.includes(t.symbol),
+        );
+
+        const majorPairs = [
+          "BTCUSDT",
+          "ETHUSDT",
+          "ASTERUSDT",
+          "BNBUSDT",
+          "XRPUSDT",
+          "ZECUSDT",
+          "XLMUSDT",
+          "SUIUSDT",
+          "TONUSDT",
+          "BCHUSDT",
+          "LINKUSDT",
+          "ADAUSDT",
+          "AVAXUSDT",
+          "LTCUSDT",
+          "TRXUSDT",
+          "ETCUSDT",
+          "HYPEUSDT",
+        ];
+
+        let hotPairs: string[] = [];
+
+        if (env.SCAN_MODE === "VIP") {
+          hotPairs = cryptoTickers
+            .filter((t: any) => majorPairs.includes(t.symbol))
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "ALL") {
+          hotPairs = cryptoTickers.map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "TOP20") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(0, 20)
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "HOT5") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(0, 5)
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "HOT20") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(5, 20)
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "HOT40") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(20, 40)
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "HOT60") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(40, 60)
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "HOT80") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(60, 80)
+            .map((t: any) => t.symbol);
+        } else if (env.SCAN_MODE === "HOT100") {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(80, 100)
+            .map((t: any) => t.symbol);
+        } else {
+          hotPairs = cryptoTickers
+            .sort(
+              (a: any, b: any) =>
+                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
+            )
+            .slice(0, 100)
+            .map((t: any) => t.symbol);
+        }
+        pairsToScan = hotPairs;
       }
 
       let interval = '1h';
@@ -236,7 +342,7 @@ async function runHybridTradingLoop(mode: SessionMode) {
       else if (env.TRADING_STRATEGY === TradingStrategy.INTRADAY) interval = '15m';
       else if (env.TRADING_STRATEGY === TradingStrategy.SWING) interval = '1h';
 
-      for (const pair of hotPairs) {
+      for (const pair of pairsToScan) {
         try {
           // SYMBOL COOLDOWN CHECK: Skip symbols on cooldown after recent LOSS
           if (symbolCooldown.isOnCooldown(pair)) {
@@ -291,27 +397,31 @@ async function runHybridTradingLoop(mode: SessionMode) {
                 break; 
               }
             } else {
-              logger.info({ pair, reason: tacticalDecision.final_summary }, '❌ TACTICAL VETO: Gemma rejected the math signal.');
+              logger.info(
+                { pair, reason: tacticalDecision.final_summary },
+                "❌ TACTICAL VETO: Gemma rejected the math signal.",
+              );
             }
           }
         } catch (e: any) {
           logger.debug({ symbol: pair, error: e.message }, 'Pair evaluation failed, skipping');
         }
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 250));
       }
       
       process.stdout.write(`\r[QUANT PULSE] Cycle complete. Waiting for next cycle...      `);
       await new Promise(resolve => setTimeout(resolve, 1000));
 
+      await new Promise((resolve) => setTimeout(resolve, 10000));
     } catch (error) {
-      logger.error({ error }, 'Tactical loop error');
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      logger.error({ error }, "Tactical loop error");
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
 }
 
 async function bootstrap() {
-  logger.info('Starting Hyper-Gemma AI Trader (HYBRID TACTICAL MODE)');
+  logger.info("Starting Hyper-Gemma AI Trader (HYBRID TACTICAL MODE)");
   await connectMongo();
   await startMonitoringApi();
   const currentMode = SessionMode.NORMAL;
@@ -327,10 +437,10 @@ async function bootstrap() {
     await runMemoryConsolidation();
   });
 
-  logger.info('System fully operational in Hybrid Mode.');
+  logger.info("System fully operational in Hybrid Mode.");
 }
 
 bootstrap().catch((err) => {
-  logger.fatal({ err }, 'Failed to bootstrap application');
+  logger.fatal({ err }, "Failed to bootstrap application");
   process.exit(1);
 });

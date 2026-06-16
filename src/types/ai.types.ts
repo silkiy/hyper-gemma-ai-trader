@@ -3,6 +3,7 @@ import { TradeAction, MarketRegime, RiskLevel, PositionSize } from './enum.types
 export type AIDecision = {
   symbol?: string;
   decision: TradeAction;
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
   confidence_score: number;
   market_regime: MarketRegime;
   risk_level: RiskLevel;

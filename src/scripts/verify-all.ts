@@ -27,6 +27,7 @@ class FinalVerificationEngine {
       // Mock a high leverage decision to see if it caps it
       const riskyDecision: AIDecision = {
         decision: TradeAction.LONG,
+        confidence: 'LOW',
         confidence_score: 90,
         market_regime: MarketRegime.TRENDING,
         risk_level: RiskLevel.LOW,
@@ -66,6 +67,7 @@ class FinalVerificationEngine {
     try {
       const mockDecision: AIDecision = {
         decision: TradeAction.LONG,
+        confidence: 'LOW',
         confidence_score: 85,
         market_regime: MarketRegime.TRENDING,
         risk_level: RiskLevel.LOW,
@@ -129,6 +131,7 @@ if (process.env.MOCK_AI === 'true') {
   OllamaClient.prototype.generateDecision = async function(): Promise<AIDecision> {
     return {
       decision: TradeAction.LONG,
+      confidence: 'LOW',
       confidence_score: 85,
       market_regime: MarketRegime.TRENDING,
       risk_level: RiskLevel.LOW,
@@ -148,3 +151,4 @@ const { Trade } = await import('../database/models/trade.model.js');
 Trade.create = async function(data: any) { return data; } as any;
 
 new FinalVerificationEngine().run();
+

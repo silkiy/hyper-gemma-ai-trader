@@ -27,7 +27,7 @@ export class OllamaClient {
   }
 
   /**
-   * Internal helper for raw JSON generation without schema-specific validation.
+   * Internal helper for raw JSON generation.
    */
   private async generateRawJson(prompt: string): Promise<any> {
     const request: OllamaRequest = {
@@ -46,25 +46,25 @@ export class OllamaClient {
       const response = await axios.post<OllamaResponse>(
         `${this.baseUrl}/api/generate`,
         request,
-        { timeout: 300000 } // Increased to 5 minutes for larger models like gemma4
+        { timeout: 300000 }
       );
       return extractJsonFromResponse(response.data.response);
     } catch (error: any) {
       const errorMsg = error.response?.data?.error || error.message;
-      // Log cleanly without throwing the whole axios error object
       logger.error(`Ollama raw generation failed: ${errorMsg}`);
       throw new Error(`Ollama API Error: ${errorMsg}`);
     }
   }
 
   /**
-   * Specifically for trading decisions (Legacy path or specific symbol analysis).
+   * Specifically for trading decisions.
    */
   async generateDecision(prompt: string): Promise<AIDecision> {
     if (env.MOCK_AI) {
       logger.info("MOCK_AI is enabled, returning mock decision");
       return {
         decision: TradeAction.SKIP,
+        confidence: 'LOW',
         confidence_score: 90,
         market_regime: MarketRegime.RANGING,
         risk_level: RiskLevel.LOW,

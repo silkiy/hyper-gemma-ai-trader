@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { TradeAction } from '../types/enum.types.js';
 import { marketDataProvider } from './market-data.provider.js';
 import { env } from '../config/env.js';
+import { riskManager } from '../core/risk/risk-manager.js';
 
 export class OrderExecutor {
   private readonly MIN_NOTIONAL = 5.1; 
@@ -33,9 +34,8 @@ export class OrderExecutor {
       // 3. AUTO-LEVERAGE OPTIMIZATION & NOTIONAL SIZING
       const available = accountStatus.available_balance || 0;
       
-      // TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance * MAX_TRADE_ALLOCATION)
-      const maxTradeAllocation = env.MAX_TRADE_ALLOCATION; 
-      const targetNotional = Math.max(minBitgetNotional, available * maxTradeAllocation);
+      // TARGET_NOTIONAL = max(SAFETY_FLOOR, available_balance * staged_allocation)
+      const targetNotional = Math.max(minBitgetNotional, available * riskManager.getStagedAllocation(decision));
 
       // Calculate minimum leverage needed to afford this targetNotional
       const minNeededLeverage = Math.ceil(targetNotional / (available * 0.98)); 
