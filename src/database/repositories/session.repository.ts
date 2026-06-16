@@ -11,7 +11,7 @@ export class SessionRepository {
   }
 
   async update(id: string, data: Partial<ISession>): Promise<ISession | null> {
-    return await Session.findByIdAndUpdate(id, data, { new: true });
+    return await Session.findByIdAndUpdate(id, data, { returnDocument: 'after' });
   }
 }
 

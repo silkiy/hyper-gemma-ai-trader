@@ -13,51 +13,58 @@ export class PromptBuilder {
     const strategy = env.TRADING_STRATEGY;
     
     const strategyInstructions = strategy === TradingStrategy.SCALPING 
-      ? `STRATEGY: AGGRESSIVE SCALPING (High Velocity)
-         1. Anda adalah Scalper Pro: Masuk dan keluar pasar dalam hitungan menit.
-         2. Fokus pada "Volatility Bursts", "Volume Spikes", dan "Price Anomalies".
-         3. Abaikan tren jangka panjang jika ada peluang profit instan di depan mata.
-         4. Gunakan segala metode (Price Action, Momentum, dsb) untuk menggandakan modal secepat mungkin.`
-      : `STRATEGY: INTRADAY/SWING (Standard)
-         1. Fokus pada konfirmasi trend yang lebih solid.
-         2. Berikan ruang nafas bagi harga untuk bergerak.
-         3. Target profit lebih lebar.`;
+      ? `STRATEGY: AGGRESSIVE SCALPING
+         1. Kecepatan adalah segalanya. Masuk cepat, keluar cepat.
+         2. Jangan overthink — sinyal Trinity sudah tervalidasi secara matematis.
+         3. Ikuti arah Quant Direction tanpa ragu.
+         4. SL/TP sudah diatur otomatis oleh sistem. Tugas Anda hanya konfirmasi arah.`
+      : `STRATEGY: INTRADAY/SWING
+         1. Ikuti trend yang terkonfirmasi oleh Trinity Sensor.
+         2. Target profit lebih lebar dari stop loss (min R:R 1:1.5).
+         3. Hanya gunakan SKIP jika data benar-benar bertentangan dengan sinyal Trinity.`;
 
     const regimeAlert = regimeContext ? `
-      MARKET REGIME ALERT (MANDATORY — DO NOT OVERRIDE):
-      Current Hurst: ${regimeContext.hurst.toFixed(2)}
+      TRINITY SENSOR RESULT (SUDAH TERVALIDASI SECARA MATEMATIS):
+      Hurst Exponent: ${regimeContext.hurst.toFixed(2)}
       Regime: ${regimeContext.regime}
-      Trio Direction: ${regimeContext.trioDirection}
+      Quant Direction: ${regimeContext.trioDirection}
 
-      RULE: If Regime = TRENDING, you MUST follow Trio Direction or return WAIT.
-      Returning the opposite direction is FORBIDDEN and will be blocked.
+      PERINTAH WAJIB:
+      - Sinyal ini sudah melewati filter Z-Score, Hurst, dan VWAP. ANDA WAJIB MENGIKUTI Quant Direction (${regimeContext.trioDirection}).
+      - Anda HANYA boleh menolak jika ada kontradiksi FATAL (contoh: RSI > 90 untuk LONG atau RSI < 10 untuk SHORT).
+      - Jika tidak ada kontradiksi fatal, kembalikan ${regimeContext.trioDirection} dengan confidence >= 70.
     ` : '';
 
     const systemInstruction = `
-      Anda adalah "Hyper-Gemma Ultra", AI Scalping Engine agresif.
-      MISI: Eksekusi peluang dengan probabilitas profit tertinggi untuk Capital Multiplication.
-      PRINSIP:
+      Anda adalah "Execution Gemma", AI Trading Executor yang PATUH pada Trinity Sensor.
+      
+      MISI: Mengeksekusi sinyal trading yang sudah divalidasi oleh mesin matematika (Trinity Sensor).
+      
+      PRINSIP UTAMA:
       ${strategyInstructions}
       ${regimeAlert}
-      1. WAJIB Risk-to-Reward Ratio (RRR) minimal 1:1.5.
-      2. KHUSUS AKUN MIKRO: Gunakan Leverage tinggi (rata kanan) agar bisa masuk ke minimum order bursa ($5).
-      3. Anda wajib memberikan target SL/TP dalam % pergerakan harga koin yang sangat ketat.
-      ATURAN: Jawab HANYA dalam format JSON valid tanpa teks penjelasan.
+      
+      ATURAN:
+      1. Trinity Sensor sudah memvalidasi entry ini. Default Anda adalah MENGEKSEKUSI (LONG atau SHORT sesuai Quant Direction).
+      2. HANYA gunakan SKIP/WAIT jika ada kontradiksi FATAL (RSI > 90 atau < 10).
+      3. Loss streak BUKAN alasan untuk menolak. Setiap trade baru adalah independen.
+      4. Leverage dan SL/TP sudah diatur otomatis oleh sistem — jangan khawatirkan itu.
+      
+      FORMAT: Jawab HANYA dalam format JSON valid tanpa teks penjelasan.
     `;
 
-    const accountContext = `STATUS: Equity $${account.current_equity}, PnL ${account.daily_pnl}%, Loss Streak ${account.loss_streak}`;
+    const accountContext = `STATUS: Equity $${account.current_equity.toFixed(4)}, Session Loss Streak ${account.loss_streak}`;
 
     const marketContext = `
       MARKET (${marketData.pair}):
-      Price: ${marketData.current_price}, 24h: ${marketData.price_change_24h}%
-      High 24h: ${marketData.high_24h}, Low 24h: ${marketData.low_24h}
-      EMA20: ${marketData.ema20}, EMA50: ${marketData.ema50}, RSI: ${marketData.rsi}
-      Trend: ${marketData.market_trend}, ATR: ${marketData.atr}
+      Price: ${marketData.current_price}, 24h Change: ${marketData.price_change_24h}%
+      RSI: ${marketData.rsi}, ATR: ${marketData.atr}
+      Trend: ${marketData.market_trend}
     `;
 
     const memoryContext = memories.length > 0 
-      ? `LESSONS:\n${memories.map(m => `- ${m.mistake}: ${m.lesson}`).join('\n')}`
-      : 'No lessons yet. Trade well.';
+      ? `KONTEKS TRADE SEBELUMNYA (referensi saja, BUKAN alasan untuk menolak):\n${memories.map(m => `- ${m.mistake}: ${m.lesson}`).join('\n')}`
+      : '';
 
     const responseSchema = `
       SCHEMA:
@@ -66,9 +73,9 @@ export class PromptBuilder {
         "confidence_score": 0-100,
         "market_regime": "TRENDING|RANGING|VOLATILE|UNCLEAR",
         "risk_level": "LOW|MEDIUM|HIGH",
-        "leverage_suggestion": 1-500,
+        "leverage_suggestion": 1-25,
         "position_size": "SMALL|NORMAL|REDUCED",
-        "entry_reason": "string",
+        "entry_reason": "string (jelaskan alasan teknikal)",
         "risk_factors": ["string"],
         "stop_loss_logic": "string",
         "take_profit_logic": "string",
@@ -88,7 +95,7 @@ export class PromptBuilder {
       
       ${responseSchema}
       
-      Lakukan analisis sekarang.
+      Eksekusi sekarang. Ikuti Quant Direction.
     `;
   }
 }

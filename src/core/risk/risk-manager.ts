@@ -2,11 +2,13 @@ import type { AIDecision } from '../../types/ai.types.js';
 import { TradeAction, RiskLevel, PositionSize, SessionMode, TradingStrategy } from '../../types/enum.types.js';
 import { logger } from '../../utils/logger.js';
 import type { AccountStatus } from '../../types/market.types.js';
+import { cooldownManager } from './cooldown-manager.js';
 
 import { env } from '../../config/env.js';
 
 export class RiskManager {
-  private maxDailyLossPercent = 100; 
+  private maxDailyLossPercent = -20.0; // Circuit Breaker: -20% (adjusted for micro-account)
+  private maxLossStreak = env.MAX_CONSECUTIVE_LOSS; // Configurable from .env
   private maxRiskPerTradePercent = 100; 
   private maxLeverage = 500; 
   private minConfidenceScore = 40; 
@@ -20,7 +22,37 @@ export class RiskManager {
       logger.info('Validating trade decision against risk rules (DYNAMIC LEVERAGE MODE)');
     }
 
-    // 0. Check for existing positions (Dynamic Limit)
+    // 0. Hardcore Circuit Breaker Check
+    if (cooldownManager.isCooldownActive()) {
+      const remaining = cooldownManager.getRemainingMinutes().toFixed(1);
+      return { 
+        ...decision, 
+        decision: TradeAction.SKIP, 
+        final_summary: `Blocked: Hardcore Circuit Breaker Active (${remaining}m remaining)` 
+      };
+    }
+
+    if (account.daily_pnl <= this.maxDailyLossPercent) {
+      logger.fatal({ pnl: account.daily_pnl }, '🚨 CIRCUIT BREAKER TRIGGERED: Daily loss limit reached.');
+      cooldownManager.startCooldown(240); // 4 hours
+      return { 
+        ...decision, 
+        decision: TradeAction.SKIP, 
+        final_summary: `Blocked: Daily loss limit reached (${account.daily_pnl}%)` 
+      };
+    }
+
+    if (account.loss_streak >= this.maxLossStreak) {
+      logger.fatal({ streak: account.loss_streak }, '🚨 CIRCUIT BREAKER TRIGGERED: Consecutive loss streak reached.');
+      cooldownManager.startCooldown(240); // 4 hours
+      return { 
+        ...decision, 
+        decision: TradeAction.SKIP, 
+        final_summary: `Blocked: Loss streak reached (${account.loss_streak})` 
+      };
+    }
+
+    // 1. Check for existing positions (Dynamic Limit)
     const activePositions = account.open_positions || [];
     const threshold = this.getLiqSafetyThreshold();
     

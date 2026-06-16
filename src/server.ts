@@ -12,9 +12,14 @@ import { marketDataProvider } from './exchange/market-data.provider.js';
 import { sessionService } from './services/session.service.js';
 import { quantEngine } from './core/quant/quant-engine.js';
 import { strategyGovernor } from './core/ai/strategy-governor.js';
+import { tradeRepository } from './database/repositories/trade.repository.js';
+import { symbolCooldown } from './core/risk/symbol-cooldown.js';
 import { env } from './config/env.js';
 import type { AccountStatus } from './types/market.types.js';
 import cron from 'node-cron';
+
+// In-memory tracker for Smart Breakeven (Trailing Stop)
+const peakPnlMap = new Map<string, number>();
 
 async function displayPortfolioSnapshot(status?: AccountStatus) {
   try {
@@ -37,7 +42,6 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
           const pnl = parseFloat(p.unRealizedProfit || '0');
           const liqPrice = parseFloat(p.liquidationPrice || '0');
           
-          // Use mapped marginUsed or calculate fallback
           const margin = parseFloat(p.marginUsed || '0') || (leverage > 0 ? (Math.abs(size) * entryPrice) / leverage : 0);
           const roe = margin > 0 ? (pnl / margin) * 100 : 0;
 
@@ -45,7 +49,6 @@ async function displayPortfolioSnapshot(status?: AccountStatus) {
           const markPriceFormatted = markPrice < 0.01 ? markPrice.toFixed(7) : (markPrice < 1 ? markPrice.toFixed(4) : markPrice.toFixed(2));
           const liqPriceFormatted = liqPrice < 0.01 ? liqPrice.toFixed(7) : (liqPrice < 1 ? liqPrice.toFixed(4) : liqPrice.toFixed(2));
 
-          // FIX 3: Use holdSide for accurate direction
           let sideDisplay = 'NEUTRAL';
           if (p.holdSide) sideDisplay = p.holdSide.toUpperCase();
           else sideDisplay = size > 0 ? 'LONG' : (size < 0 ? 'SHORT' : 'CLOSED');
@@ -78,29 +81,139 @@ async function runHybridTradingLoop(mode: SessionMode) {
   // 1. Initial Strategy Refresh
   await strategyGovernor.refreshDirective();
 
+  let cachedRwaSymbols: string[] = [];
+  let lastRwaRefresh = 0;
+  const RWA_REFRESH_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+
+  const blacklistedKeywords = [
+    "GOLD", "SILVER", "OIL", "XAU", "XAG", "AAPL", "TSLA", "NVDA", "MSFT", 
+    "GOOGL", "AMZN", "META", "NFLX", "SPX", "NDX", "US30"
+  ];
+
+  const majorPairs = [
+    'BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'BNBUSDT', 'XRPUSDT', 
+    'ZECUSDT', 'XLMUSDT', 'SUIUSDT', 'TONUSDT', 'BCHUSDT',
+    'LINKUSDT', 'ADAUSDT', 'AVAXUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT',
+    'HYPEUSDT'
+  ];
+
   // 2. High-Speed Loop with Tactical AI Confirmation
   while (true) {
     try {
+      // Fetch account status ONCE per cycle (reduces Bitget API calls)
       const accountStatus = await marketDataProvider.getAccountStatus();
+
+      // Record WIN/LOSS results for recently closed trades
+      await tradeService.syncTradeResults(accountStatus);
+      // 1. CAPITAL SHIELD: Dollar-Loss Exit (BACKUP ONLY — Bitget SL is primary)
+      // This only triggers if PnL exceeds 2x the SCALP_MAX_LOSS_USD threshold,
+      // meaning Bitget's atomic SL failed or was removed.
+      if (accountStatus.open_positions?.length > 0) {
+        for (const pos of accountStatus.open_positions) {
+          try {
+            const pnl = parseFloat(pos.unRealizedProfit || '0');
+            const holdSideDisplay = (pos.holdSide || 'long').toUpperCase();
+
+            // BACKUP SHIELD: Only fire at 2x threshold (Bitget SL should catch it first)
+            const backupThreshold = env.SCALP_MAX_LOSS_USD * 2;
+            if (pnl <= -backupThreshold) {
+              logger.fatal({ symbol: pos.symbol, pnl: pnl.toFixed(4), limit: backupThreshold }, `[BACKUP SHIELD EXIT] ${pos.symbol} ${holdSideDisplay} — Bitget SL may have failed! PnL: $${pnl.toFixed(4)}`);
+              await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+              continue;
+            }
+
+            // 2. TACTICAL EXITS (Time & Profit based for Scalping & Intraday)
+            if (env.TRADING_STRATEGY === TradingStrategy.SCALPING || env.TRADING_STRATEGY === TradingStrategy.INTRADAY) {
+              const tradeEntry = await tradeRepository.findOpenTradeByPair(pos.symbol);
+              if (tradeEntry && tradeEntry.created_at) {
+                const openTimeMinutes = (Date.now() - new Date(tradeEntry.created_at).getTime()) / 60000;
+
+                // Adjust limits based on strategy
+                const isIntraday = env.TRADING_STRATEGY === TradingStrategy.INTRADAY;
+                const maxHoldMinutes = isIntraday ? 480 : env.SCALP_MAX_HOLD_MINUTES; // 8 hours for Intraday
+                const timeProfitExitMinutes = isIntraday ? 120 : env.SCALP_PROFIT_EXIT_MINUTES; // 2 hours for Intraday
+                const targetProfitUsd = isIntraday ? env.SCALP_PROFIT_EXIT_USD * 3 : env.SCALP_PROFIT_EXIT_USD; // 3x target for Intraday
+
+                // Track Peak PnL for Trailing Stop
+                const currentPeak = peakPnlMap.get(pos.symbol) || 0;
+                if (pnl > currentPeak) {
+                  peakPnlMap.set(pos.symbol, pnl);
+                }
+                const highestPnl = Math.max(currentPeak, pnl);
+
+                // EXITS
+                if (openTimeMinutes > maxHoldMinutes) {
+                  logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4) }, `[TIME EXIT] ${pos.symbol} ${holdSideDisplay} force closed after ${openTimeMinutes.toFixed(0)}min (Hard Limit) | PnL: $${pnl.toFixed(4)}`);
+                  peakPnlMap.delete(pos.symbol);
+                  await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+                } else if (openTimeMinutes > timeProfitExitMinutes && pnl > 0) {
+                  logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4) }, `[TIME EXIT] ${pos.symbol} ${holdSideDisplay} force closed after ${openTimeMinutes.toFixed(0)}min (Time+Profit) | PnL: +$${pnl.toFixed(4)}`);
+                  peakPnlMap.delete(pos.symbol);
+                  await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+                } else if (pnl >= targetProfitUsd) {
+                  logger.warn({ symbol: pos.symbol, pnl: pnl.toFixed(4), target: targetProfitUsd }, `[PROFIT EXIT] ${pos.symbol} ${holdSideDisplay} target +$${targetProfitUsd} reached | PnL: +$${pnl.toFixed(4)}`);
+                  peakPnlMap.delete(pos.symbol);
+                  await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+                } else if (highestPnl >= targetProfitUsd * 0.8 && pnl <= targetProfitUsd * 0.5) {
+                  // TRAILING STOP TIER 1: Reached 80%, lock in 50%
+                  logger.warn({ symbol: pos.symbol, highest: highestPnl.toFixed(4), pnl: pnl.toFixed(4) }, `[TRAILING STOP] ${pos.symbol} ${holdSideDisplay} secured 50% profit after 80% peak! | PnL: $${pnl.toFixed(4)}`);
+                  peakPnlMap.delete(pos.symbol);
+                  await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+                } else if (highestPnl >= targetProfitUsd * 0.5 && pnl <= targetProfitUsd * 0.2) {
+                  // TRAILING STOP TIER 2: Reached 50%, lock in 20%
+                  logger.warn({ symbol: pos.symbol, highest: highestPnl.toFixed(4), pnl: pnl.toFixed(4) }, `[TRAILING STOP] ${pos.symbol} ${holdSideDisplay} secured 20% profit after 50% peak! | PnL: $${pnl.toFixed(4)}`);
+                  peakPnlMap.delete(pos.symbol);
+                  await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+                } else if (highestPnl >= targetProfitUsd * 0.3 && pnl <= 0.005) {
+                  // SMART BREAKEVEN TIER 3: Reached 30% target but reversed to nearly 0
+                  logger.warn({ symbol: pos.symbol, highest: highestPnl.toFixed(4), pnl: pnl.toFixed(4) }, `[SMART BREAKEVEN] ${pos.symbol} ${holdSideDisplay} reversed from profit! Securing capital | PnL: $${pnl.toFixed(4)}`);
+                  peakPnlMap.delete(pos.symbol);
+                  await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
+                }
+              }
+            }
+          } catch (e: any) {
+            logger.error({ symbol: pos.symbol, error: e.message }, 'Failed during position exit check');
+          }
+        }
+      }
       
-      // Check for safety blocks (Max positions or Critical Safety)
+      // STRICT POSITION BLOCKING: Completely stop scanning if we have an open position
+      if (accountStatus.open_positions && accountStatus.open_positions.length >= env.MAX_POSITIONS) {
+        await displayPortfolioSnapshot(accountStatus);
+        logger.info({ current: accountStatus.open_positions.length, limit: env.MAX_POSITIONS }, 'TRADING PAUSED: Max positions reached. Waiting for position to close...');
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds before polling again
+        continue; // Skip the entire scanning and AI evaluation block
+      }
+      
+      // Check for other critical safety blocks (Cooldowns, Daily Loss Limits)
       const dummyDecision = { decision: TradeAction.SKIP, final_summary: 'PRE_SCAN_CHECK' } as any;
       const riskValidation = riskManager.validateDecision(dummyDecision, accountStatus, mode);
       
-      if (riskValidation.decision === TradeAction.SKIP && (riskValidation.final_summary?.startsWith('Blocked: Safety') || riskValidation.final_summary?.startsWith('Blocked: Max positions'))) {
+      if (riskValidation.decision === TradeAction.SKIP && riskValidation.final_summary?.startsWith('Blocked:')) {
         await displayPortfolioSnapshot(accountStatus);
         await new Promise(resolve => setTimeout(resolve, 10000));
         continue;
       }
 
-      const allTickers = await bitgetClient.getAllTickers();
+      let allTickers = await bitgetClient.getAllTickers();
       
-      const majorPairs = [
-        'BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'BNBUSDT', 'XRPUSDT', 
-        'ZECUSDT', 'XLMUSDT', 'SUIUSDT', 'TONUSDT', 'BCHUSDT',
-        'LINKUSDT', 'ADAUSDT', 'AVAXUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT',
-        'HYPEUSDT'
-      ];
+      // Filter out RWA and non-crypto assets
+      const now = Date.now();
+      if (now - lastRwaRefresh > RWA_REFRESH_INTERVAL || cachedRwaSymbols.length === 0) {
+        logger.info('Refreshing RWA symbol list from Bitget...');
+        const exchangeInfo = await bitgetClient.getExchangeInfo();
+        cachedRwaSymbols = exchangeInfo
+          .filter((s: any) => s.isRwa === 'YES')
+          .map((s: any) => s.symbol.replace('_UMCBL', ''));
+        lastRwaRefresh = now;
+      }
+
+      allTickers = allTickers.filter((t: any) => {
+        const isRwa = cachedRwaSymbols.includes(t.symbol);
+        const hasBlacklistedKeyword = blacklistedKeywords.some(kw => t.symbol.includes(kw));
+        return !isRwa && !hasBlacklistedKeyword;
+      });
 
       let hotPairs: string[] = [];
 
@@ -118,34 +231,63 @@ async function runHybridTradingLoop(mode: SessionMode) {
           .map((t: any) => t.symbol);
       }
 
-      const interval = env.TRADING_STRATEGY === TradingStrategy.INTRADAY ? '15m' : '5m';
+      let interval = '1h';
+      if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) interval = '1m';
+      else if (env.TRADING_STRATEGY === TradingStrategy.INTRADAY) interval = '15m';
+      else if (env.TRADING_STRATEGY === TradingStrategy.SWING) interval = '1h';
 
       for (const pair of hotPairs) {
         try {
-          // Get full OHLCV history for Trinity analysis (100 candles)
-          const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, 100);
+          // SYMBOL COOLDOWN CHECK: Skip symbols on cooldown after recent LOSS
+          if (symbolCooldown.isOnCooldown(pair)) {
+            continue;
+          }
+
+          const historyLimit = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 50 : 100;
+          const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, historyLimit);
           
-          // 1. MATH SENSOR (Trinity: Z + Hurst + VWAP)
           const { decision: quantDecision, zScore, threshold, hurst, trioDirection: mathDir } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
           
+          // 1.1 ALPHA DETECTION: High Hurst (>0.70) indicates independent momentum (Meme behavior)
+          const isAlpha = hurst > 0.70;
+
           // Real-time Pulse Log (Trinity View)
           const thresholdSymbol = zScore < 0 ? `-${threshold.toFixed(2)}` : `+${threshold.toFixed(2)}`;
-          const regime = hurst >= (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRND' : 'RNG';
-          process.stdout.write(`\r[PULSE] ${pair} | Z: ${zScore.toFixed(2)} (${thresholdSymbol}) | H: ${hurst.toFixed(2)} [${regime}]      `);
+          const regimeLabel = isAlpha ? 'ALPHA' : (hurst >= (env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 0.5 : 0.6) ? 'TRND' : 'RNG');
+          process.stdout.write(`\r[PULSE] ${pair} | Z: ${zScore.toFixed(2)} (${thresholdSymbol}) | H: ${hurst.toFixed(2)} [${regimeLabel}]      `);
 
           if (quantDecision) {
-            console.log(''); // Clear pulse line
-            logger.info({ pair, zScore: zScore.toFixed(2), hurst: hurst.toFixed(2), regime, mathDir }, '🎯 TRINITY SENSOR HIT!');
+            // VOLUME GATE: Minimum 24h volume
+            const ticker = allTickers.find((t: any) => t.symbol === pair);
+            const volume24hUsd = parseFloat(ticker?.volume || '0');
+            if (volume24hUsd < 100000) {
+              continue; // Skip illiquid coins silently
+            }
+
+            // MOMENTUM GUARD: Block entry against extreme 24h momentum
+            const change24h = parseFloat(ticker?.priceChangePercent || '0');
+            
+            if (mathDir === 'LONG' && change24h < -5) {
+              logger.warn({ pair, change24h: `${change24h.toFixed(2)}%`, mathDir }, '[MOMENTUM GUARD] Blocked LONG on crashing coin');
+              continue;
+            }
+            if (mathDir === 'SHORT' && change24h > 5) {
+              logger.warn({ pair, change24h: `${change24h.toFixed(2)}%`, mathDir }, '[MOMENTUM GUARD] Blocked SHORT on pumping coin');
+              continue;
+            }
+
+            console.log('');
+            logger.info({ pair, zScore: zScore.toFixed(2), hurst: hurst.toFixed(2), regime: regimeLabel, mathDir }, '🎯 TRINITY SENSOR HIT!');
             
             // 2. AI SNIPER (Gemma confirms the math signal)
-            // Pass mathDir to ensure guard logic is synchronized
-            const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode, mathDir);
+            // Pass mathDir and isAlpha to allow Momentum Override for Meme/Alpha coins
+            const tacticalDecision = await decisionEngine.evaluateTrade(pair, mode, mathDir, isAlpha);
             
             if (tacticalDecision.decision !== 'SKIP' && tacticalDecision.decision !== 'WAIT') {
               logger.info({ pair }, '⚡ TACTICAL STRIKE: Gemma confirmed! Executing trade...');
               const execution = await tradeService.handleTradeDecision(tacticalDecision, pair);
               if (execution) {
-                console.log(''); // Clear pulse line
+                console.log('');
                 break; 
               }
             } else {
@@ -153,14 +295,12 @@ async function runHybridTradingLoop(mode: SessionMode) {
             }
           }
         } catch (e: any) {
-          // Log the error softly so we know if a coin is failing silently
-          // process.stdout.write(`\r[QUANT PULSE] Error on ${pair}: ${e.message}      `);
+          logger.debug({ symbol: pair, error: e.message }, 'Pair evaluation failed, skipping');
         }
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       
       process.stdout.write(`\r[QUANT PULSE] Cycle complete. Waiting for next cycle...      `);
-
       await new Promise(resolve => setTimeout(resolve, 1000));
 
     } catch (error) {
@@ -177,15 +317,12 @@ async function bootstrap() {
   const currentMode = SessionMode.NORMAL;
   await sessionService.startNewSession(currentMode);
 
-  // Path 1: Strategy Governor (Every 1 hour Gemma wakes up)
   cron.schedule('0 * * * *', async () => {
     await strategyGovernor.refreshDirective();
   });
 
-  // Path 2: Tactical Execution Engine
   runHybridTradingLoop(currentMode).catch(err => logger.fatal({ err }, 'Fatal Engine Error'));
 
-  // Path 3: Background Jobs
   cron.schedule('0 0 * * *', async () => {
     await runMemoryConsolidation();
   });

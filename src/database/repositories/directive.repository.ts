@@ -6,12 +6,11 @@ export class DirectiveRepository {
     return await BattleDirective.findOne().sort({ last_updated: -1 });
   }
 
-  async update(data: Partial<IBattleDirective>): Promise<IBattleDirective> {
-    return await BattleDirective.findOneAndUpdate(
-      {}, 
-      { ...data, last_updated: new Date() }, 
-      { upsert: true, returnDocument: 'after' }
-    );
+  async create(data: Partial<IBattleDirective>): Promise<IBattleDirective> {
+    return await BattleDirective.create({
+      ...data,
+      last_updated: new Date()
+    });
   }
 }
 
