@@ -53,7 +53,7 @@ export class StrategyGovernor {
       const response = await ollamaClient.generateValidatedJson(prompt, validateBattleDirective);
       
       // 2. Save Directive
-      await directiveRepository.update({
+      await directiveRepository.create({
         bias: response.bias,
         z_score_threshold: response.z_score_threshold,
         kalman_aggressiveness: response.kalman_aggressiveness,

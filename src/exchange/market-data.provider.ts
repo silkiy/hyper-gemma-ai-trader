@@ -7,20 +7,33 @@ import type { MarketData, AccountStatus } from '../types/market.types.js';
 import { logger } from '../utils/logger.js';
 
 import { env } from '../config/env.js';
-import { TradingStrategy } from '../types/enum.types.js';
+import { TradingStrategy, TradeAction } from '../types/enum.types.js';
 
 export class MarketDataProvider {
+  private cachedTickers: any[] = [];
+  private lastTickerFetch = 0;
+  private readonly TICKER_CACHE_TTL = 5000; // 5 seconds cache
+
+  private async getTickersWithCache(): Promise<any[]> {
+    const now = Date.now();
+    if (now - this.lastTickerFetch > this.TICKER_CACHE_TTL || this.cachedTickers.length === 0) {
+      logger.info('Refreshing ticker cache from Bitget...');
+      // We use the raw endpoint directly to get ALL fields (including high/low) in one go
+      const response = await axios.get(`${env.BITGET_BASE_URL}/api/v2/mix/market/tickers?productType=USDT-FUTURES`);
+      this.cachedTickers = response.data.data;
+      this.lastTickerFetch = now;
+    }
+    return this.cachedTickers;
+  }
+
   async getMarketData(pair: string): Promise<MarketData> {
     const symbol = pair.replace('/', '').replace('-', '');
     
     const interval = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? '5m' : '1h';
     
-    logger.info({ symbol, interval, strategy: env.TRADING_STRATEGY }, 'Fetching real-time market data from Bitget API');
-
     try {
       const klines = await bitgetClient.getCandles(symbol, interval);
       
-      // Bitget Mix: [Time, Open, High, Low, Close, Volume, Amount]
       const closePrices = klines.map((c: any) => parseFloat(c[4]));
       const highPrices = klines.map((c: any) => parseFloat(c[2]));
       const lowPrices = klines.map((c: any) => parseFloat(c[3]));
@@ -35,12 +48,13 @@ export class MarketDataProvider {
       if (currentPrice > ema20 && ema20 > ema50) trend = 'BULLISH';
       else if (currentPrice < ema20 && ema20 < ema50) trend = 'BEARISH';
 
-      const allTickers = await bitgetClient.getAllTickers();
-      const ticker = allTickers.find((t: any) => t.symbol === symbol);
-      
-      // Find raw ticker for high/low data
-      const rawTickers = await axios.get(`${env.BITGET_BASE_URL}/api/v2/mix/market/tickers?productType=USDT-FUTURES`);
-      const rawTicker = rawTickers.data.data.find((t: any) => t.symbol === (symbol.endsWith('_UMCBL') ? symbol : `${symbol}_UMCBL`));
+      // 429 PREVENTION: Use shared ticker cache
+      const tickers = await this.getTickersWithCache();
+      const rawTicker = tickers.find((t: any) => 
+        t.symbol === symbol || 
+        t.symbol === `${symbol}_UMCBL` || 
+        t.symbol.replace('_UMCBL', '') === symbol
+      );
 
       return {
         pair,
@@ -48,7 +62,7 @@ export class MarketDataProvider {
         ema20,
         ema50,
         rsi,
-        volume_24h: ticker ? parseFloat(ticker.volume || '0') : parseFloat(klines[klines.length - 1][5] || '0'),
+        volume_24h: rawTicker ? parseFloat(rawTicker.usdtVolume || '0') : parseFloat(klines[klines.length - 1][5] || '0'),
         market_trend: trend,
         atr,
         funding_rate: 0,
@@ -56,10 +70,10 @@ export class MarketDataProvider {
         high_24h: rawTicker ? parseFloat(rawTicker.high24h || '0') : 0,
         low_24h: rawTicker ? parseFloat(rawTicker.low24h || '0') : 0,
         timestamp: Date.now(),
-        price_change_24h: ticker ? parseFloat(ticker.priceChangePercent || '0') : 0, 
+        price_change_24h: rawTicker ? parseFloat(rawTicker.change24h || '0') * 100 : 0, 
       };
     } catch (error) {
-      logger.error('Failed to provide real market data from Bitget API');
+      logger.error({ error, symbol }, 'Failed to provide real market data from Bitget API');
       throw error;
     }
   }
@@ -73,11 +87,13 @@ export class MarketDataProvider {
       let walletBalance = usdtAccount ? parseFloat(usdtAccount.accountEquity || usdtAccount.equity || '0') : 0;
       let availableBalance = usdtAccount ? parseFloat(usdtAccount.available || '0') : 0;
       
-      // VIRTUAL BALANCE FALLBACK (For PAPER mode with 0 actual funds)
-      if (env.TRADING_MODE === 'PAPER' && walletBalance <= 0) {
-        logger.info('PAPER MODE: Actual balance is $0. Providing virtual $1.00 for simulation.');
-        walletBalance = 1.0;
-        availableBalance = 1.0;
+      if (env.TRADING_MODE === 'PAPER') {
+        // Strict Virtual Balance for PAPER mode to isolate from real funds
+        const currentSessionId = sessionService.getCurrentSessionId();
+        const dailyStats = await tradeRepository.getDailyStats(currentSessionId);
+        
+        walletBalance = 1.0 + dailyStats.dailyPnL; // Base $1.00 + Realized PnL
+        availableBalance = walletBalance;
       }
       
       const activePositions = Array.isArray(positions) 
@@ -95,66 +111,74 @@ export class MarketDataProvider {
       let mappedPositions = activePositions.map(p => ({
         symbol: p.symbol.replace('_UMCBL', ''),
         size: p.total,
-        entryPrice: p.averageOpenPrice,
+        entryPrice: p.openPriceAvg || p.averageOpenPrice,
         markPrice: p.markPrice,
         unRealizedProfit: p.unrealizedPL,
         liquidationPrice: p.liquidationPrice,
         leverage: p.leverage,
-        holdSide: p.holdSide, // FIX 3: Explicitly store long/short from Bitget
-        marginUsed: p.marginSize || p.margin // FIX 2: Correct margin field
+        holdSide: p.holdSide, 
+        marginUsed: p.marginSize || p.margin 
       }));
 
-      // FIX: Isolation for LIVE MODE (Ignore positions not started by this bot)
-      if (env.TRADING_MODE === 'LIVE') {
-        const currentSessionId = sessionService.getCurrentSessionId();
-        const recentTrades = await tradeRepository.findRecent(20);
-        const sessionTrades = recentTrades.filter(t => t.session_id.toString() === currentSessionId);
-        
-        // Only keep positions that have a matching trade in the current session
-        mappedPositions = mappedPositions.filter(pos => 
-          sessionTrades.some(t => t.pair === pos.symbol)
-        );
-      }
+      // LIVE MODE: Show ALL real Bitget positions regardless of session.
+      // This prevents invisible positions after bot restart which could cause double-opens.
 
-      // FIX 2: Isolation for PAPER MODE
       if (env.TRADING_MODE === 'PAPER') {
-        // Reset: Ignore real positions to keep simulation isolated
         mappedPositions = []; 
         totalMaintenanceMargin = 0;
+        totalUnrealizedPnL = 0;
 
         const currentSessionId = sessionService.getCurrentSessionId();
-        const recentTrades = await tradeRepository.findRecent(10);
-        // Only count mock positions from the CURRENT session
-        const sessionTrades = recentTrades.filter(t => t.session_id.toString() === currentSessionId);
+        const recentTrades = await tradeRepository.findRecent(20);
+        const sessionTrades = recentTrades.filter(t => t.session_id.toString() === currentSessionId && t.result == null);
         
+        const tickers = await this.getTickersWithCache();
+
         for (const t of sessionTrades) {
-          if (!mappedPositions.find(p => p.symbol === t.pair)) {
-            mappedPositions.push({
-              symbol: t.pair,
-              size: 'MOCK',
-              entryPrice: t.entry_price?.toString() || '0',
-              markPrice: t.entry_price?.toString() || '0',
-              unRealizedProfit: '0',
-              liquidationPrice: '0',
-              leverage: t.leverage?.toString() || '1',
-              holdSide: t.action.toLowerCase() === 'buy' ? 'long' : 'short', // Mock direction
-              marginUsed: '0.10'
-            });
-            // Assume 20% margin usage for each mock position for calculation
-            totalMaintenanceMargin += 0.10; 
-          }
+          const ticker = tickers.find((tick: any) => tick.symbol === t.pair);
+          const currentPrice = ticker ? parseFloat(ticker.lastPr || ticker.lastPrice) : t.entry_price;
+          
+          const priceDiff = t.action === TradeAction.LONG 
+            ? (currentPrice - t.entry_price) 
+            : (t.entry_price - currentPrice);
+          
+          const quantity = 5.1 / t.entry_price; 
+          const unrealizedPnL = priceDiff * quantity;
+
+          mappedPositions.push({
+            symbol: t.pair,
+            size: quantity.toString(),
+            entryPrice: t.entry_price.toString(),
+            markPrice: currentPrice.toString(),
+            unRealizedProfit: unrealizedPnL.toFixed(4),
+            liquidationPrice: '0',
+            leverage: t.leverage.toString(),
+            holdSide: t.action === TradeAction.LONG ? 'long' : 'short',
+            marginUsed: '0.10'
+          });
+
+          totalUnrealizedPnL += unrealizedPnL;
+          totalMaintenanceMargin += 0.10; 
         }
       }
 
-      const marginBalance = walletBalance; 
-      const equity = walletBalance; 
+      const marginBalance = walletBalance + totalUnrealizedPnL; 
+      const equity = walletBalance + totalUnrealizedPnL; 
       const marginRatio = marginBalance > 0 ? (totalMaintenanceMargin / marginBalance) * 100 : 0;
+
+      // 4. Calculate Real Performance Metrics from Database
+      const currentSessionId = sessionService.getCurrentSessionId();
+      const dailyStats = await tradeRepository.getDailyStats(currentSessionId);
+      const lossStreak = await tradeRepository.getConsecutiveLosses(currentSessionId);
+      
+      // Calculate daily PnL as percentage
+      const dailyPnLPct = equity > 0 ? (dailyStats.dailyPnL / equity) * 100 : 0;
 
       return {
         current_equity: equity,
         open_positions: mappedPositions,
-        daily_pnl: 0,
-        loss_streak: 0,
+        daily_pnl: parseFloat(dailyPnLPct.toFixed(2)),
+        loss_streak: lossStreak,
         available_balance: availableBalance,
         margin_ratio: marginRatio,
         maintenance_margin: totalMaintenanceMargin,

@@ -194,6 +194,48 @@ export class BitgetClient {
     }
   }
 
+  /**
+   * Force close an existing position via Market Order (Flash Close)
+   */
+  async closePosition(symbol: string, holdSide: 'long' | 'short' | 'net', size: string) {
+    if (env.TRADING_MODE === 'PAPER') {
+      logger.info({ symbol, holdSide }, 'PAPER MODE: Simulating market close order');
+      return { code: '00000', data: { orderId: `mock-close-${Date.now()}` } };
+    }
+
+    const formattedSymbol = this.formatSymbol(symbol);
+    const timestamp = this.getTimestamp();
+    const requestPath = '/api/v2/mix/order/close-positions';
+    
+    // Construct body based on whether holdSide is valid for hedge mode or net mode
+    const payload: any = {
+      symbol: formattedSymbol,
+      productType: 'USDT-FUTURES'
+    };
+
+    // If holdSide is strictly long or short, specify it (for Hedge mode). 
+    // If it's 'net', omit it (for One-way mode to close the whole symbol position).
+    if (holdSide === 'long' || holdSide === 'short') {
+      payload.holdSide = holdSide;
+    }
+
+    const body = JSON.stringify(payload);
+    const signature = this.generateSignature(timestamp, 'POST', requestPath, body);
+    
+    try {
+      const response = await axios.post(`${this.baseUrl}${requestPath}`, body, {
+        headers: this.getHeaders(timestamp, signature)
+      });
+      if (response.data.code !== '00000') throw new Error(response.data.msg);
+      logger.info({ symbol, holdSide, size }, 'Flash close order executed successfully');
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data?.msg || error.message;
+      logger.error({ symbol, holdSide, error: msg }, 'Failed to execute flash close on Bitget V2');
+      throw error;
+    }
+  }
+
   async getPositions() {
     const timestamp = this.getTimestamp();
     const requestPath = '/api/v2/mix/position/all-position?productType=USDT-FUTURES';
@@ -213,38 +255,41 @@ export class BitgetClient {
   }
 
   async getFillHistory(symbol: string, limit: number = 20) {
+    const formattedSymbol = this.formatSymbol(symbol);
     const timestamp = this.getTimestamp();
-    // The fills endpoint accepts the plain symbol without the _UMCBL suffix
-    const formattedSymbol = symbol.toUpperCase();
     const requestPath = `/api/v2/mix/order/fills?symbol=${formattedSymbol}&productType=USDT-FUTURES&limit=${limit}`;
     const signature = this.generateSignature(timestamp, 'GET', requestPath);
-
+    
     try {
       const response = await axios.get(`${this.baseUrl}${requestPath}`, {
         headers: this.getHeaders(timestamp, signature)
       });
       if (response.data.code !== '00000') throw new Error(response.data.msg);
-      return response.data.data;
+      const data = response.data.data;
+      return Array.isArray(data) ? data : (data?.fillList || []);
     } catch (error: any) {
       const msg = error.response?.data?.msg || error.message;
-      // Silently skip if symbol doesn't exist on Bitget to avoid log spam
-      if (msg?.includes('Parameter does not exist')) {
-        return [];
-      }
-      logger.error({ symbol, error: msg }, 'Failed to fetch Bitget V2 fill history');
+      logger.error({ symbol, error: msg }, 'Failed to fetch Bitget V2 fills');
       throw error;
     }
   }
 
-  async getExchangeInfo() {
-    const requestPath = '/api/v2/mix/market/contracts?symbol=&productType=USDT-FUTURES';
+  async getHistoryOrders(symbol: string, limit: number = 20) {
+    const formattedSymbol = this.formatSymbol(symbol);
+    const timestamp = this.getTimestamp();
+    const requestPath = `/api/v2/mix/order/history?symbol=${formattedSymbol}&productType=USDT-FUTURES&limit=${limit}`;
+    const signature = this.generateSignature(timestamp, 'GET', requestPath);
+    
     try {
-      const response = await axios.get(`${this.baseUrl}${requestPath}`);
+      const response = await axios.get(`${this.baseUrl}${requestPath}`, {
+        headers: this.getHeaders(timestamp, signature)
+      });
       if (response.data.code !== '00000') throw new Error(response.data.msg);
-      return response.data.data;
+      const data = response.data.data;
+      return Array.isArray(data) ? data : (data?.orderList || []);
     } catch (error: any) {
       const msg = error.response?.data?.msg || error.message;
-      logger.error({ error: msg }, 'Failed to fetch Bitget V2 exchange info');
+      logger.error({ symbol, error: msg }, 'Failed to fetch Bitget V2 history orders');
       throw error;
     }
   }
@@ -266,6 +311,19 @@ export class BitgetClient {
       return { quantityPrecision: 0, pricePrecision: 8, maxLeverage: 10, minTradeUSDT: 5.0 };
     } catch (e) {
       return { quantityPrecision: 0, pricePrecision: 8, maxLeverage: 10, minTradeUSDT: 5.0 };
+    }
+  }
+
+  async getExchangeInfo() {
+    const requestPath = '/api/v2/mix/market/contracts?productType=USDT-FUTURES';
+    try {
+      const response = await axios.get(`${this.baseUrl}${requestPath}`);
+      if (response.data.code !== '00000') throw new Error(response.data.msg);
+      return response.data.data;
+    } catch (error: any) {
+      const msg = error.response?.data?.msg || error.message;
+      logger.error({ error: msg }, 'Failed to fetch exchange info from Bitget V2');
+      return [];
     }
   }
 

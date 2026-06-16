@@ -6,9 +6,9 @@ const envSchema = z.object({
   MONGODB_URI: z.string().url(),
 
   // Bitget API Config
-  BITGET_API_KEY: z.string().optional(),
-  BITGET_SECRET_KEY: z.string().optional(),
-  BITGET_PASSPHRASE: z.string().optional(),
+  BITGET_API_KEY: z.string().min(1, "BITGET_API_KEY is required"),
+  BITGET_SECRET_KEY: z.string().min(1, "BITGET_SECRET_KEY is required"),
+  BITGET_PASSPHRASE: z.string().min(1, "BITGET_PASSPHRASE is required"),
   BITGET_BASE_URL: z.string().url().default('https://api.bitget.com'),
 
   OLLAMA_BASE_URL: z.string().url().default('http://localhost:11434'),
@@ -19,23 +19,15 @@ const envSchema = z.object({
   HYPERLIQUID_TESTNET: z.string().default('true').transform(v => v !== 'false'),
   PORT: z.string().default('3000').transform(Number),
   MAX_POSITIONS: z.string().default('1').transform(Number),
-  MAX_CONSECUTIVE_LOSS: z.string().default('10').transform(Number),
-  MAX_TRADE_ALLOCATION: z.string().default('0.25').transform(Number), // Default 25%
+  MAX_CONSECUTIVE_LOSS: z.string().default('5').transform(Number),
+  MAX_TRADE_ALLOCATION: z.string().default('0.20').transform(Number), // Default 20% of balance
   MIN_TPSL_NOTIONAL: z.string().default('10').transform(Number), // Default 10 USDT for SL/TP
   TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
-  SCAN_MODE: z.enum(['VIP','TOP20', 'HOT5', 'HOT20', 'HOT40', 'HOT60', 'HOT80', 'HOT100','ALL']).default('VIP'),
+  SCAN_MODE: z.enum(['VIP', 'HOT50', 'ALL']).default('ALL'),
   TRADING_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
-  TRADING_MODE_PAIR: z.enum(['SINGLE', 'MULTI']).default('MULTI'),
-  FOCUS_PAIR: z.string().optional(),
-  }).refine(data => {
-  if (data.TRADING_MODE_PAIR === 'SINGLE' && !data.FOCUS_PAIR) {
-    return false;
-  }
-  return true;
-  }, {
-  message: "FOCUS_PAIR is required when TRADING_MODE_PAIR is set to SINGLE",
-  path: ["FOCUS_PAIR"]
-  });
-
-  export const env = envSchema.parse(process.env);
+  SCALP_MAX_HOLD_MINUTES: z.string().default('10').transform(Number),
+  SCALP_PROFIT_EXIT_MINUTES: z.string().default('5').transform(Number),
+  SCALP_PROFIT_EXIT_USD: z.string().default('0.05').transform(Number),
+  SCALP_MAX_LOSS_USD: z.string().default('0.03').transform(Number),
+});
 

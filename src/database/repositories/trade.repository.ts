@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Trade } from '../models/trade.model.js';
 import type { ITrade } from '../models/trade.model.js';
 
@@ -10,12 +11,16 @@ export class TradeRepository {
     return await Trade.find().sort({ created_at: -1 }).limit(limit);
   }
 
-  async findOpenTrades(): Promise<ITrade[]> {
-    return await Trade.find({ result: { $exists: false } });
+  async findOpenTradeByPair(pair: string): Promise<ITrade | null> {
+    return await Trade.findOne({ pair: pair, result: { $exists: false } }).sort({ created_at: -1 });
   }
 
-  async closeTradeRecord(tradeId: string, data: Partial<ITrade>): Promise<ITrade | null> {
-    return await Trade.findByIdAndUpdate(tradeId, { $set: data }, { new: true });
+  async update(id: string, data: Partial<ITrade>): Promise<ITrade | null> {
+    return await Trade.findByIdAndUpdate(id, data, { returnDocument: 'after' });
+  }
+
+  async findActiveTrades(): Promise<ITrade[]> {
+    return await Trade.find({ result: null });
   }
 
   async getStats() {
@@ -30,53 +35,56 @@ export class TradeRepository {
     ]);
   }
 
-  async aggregatePairPerformance() {
-    return await Trade.aggregate([
-      { $match: { result: { $exists: true } } },
+  async getDailyStats(sessionId?: string) {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const matchFilter: any = { 
+      created_at: { $gte: startOfToday },
+      result: { $ne: null }
+    };
+    
+    // When sessionId is provided, filter per-session (for circuit breaker)
+    // When not provided, aggregate all trades today (for session display stats)
+    if (sessionId) {
+      matchFilter.session_id = new mongoose.Types.ObjectId(sessionId);
+    }
+
+    const stats = await Trade.aggregate([
+      { $match: matchFilter },
       {
         $group: {
-          _id: '$pair',
-          totalTrades: { $sum: 1 },
+          _id: null,
+          dailyPnL: { $sum: '$profit_loss' },
+          tradeCount: { $sum: 1 },
           wins: { $sum: { $cond: [{ $eq: ['$result', 'WIN'] }, 1, 0] } },
-          losses: { $sum: { $cond: [{ $eq: ['$result', 'LOSS'] }, 1, 0] } },
-          totalPnL: { $sum: '$realized_pnl' },
-          avgWin: { $avg: { $cond: [{ $eq: ['$result', 'WIN'] }, '$realized_pnl', null] } },
-          avgLoss: { $avg: { $cond: [{ $eq: ['$result', 'LOSS'] }, '$realized_pnl', null] } }
-        }
-      },
-      {
-        $project: {
-          pair: '$_id',
-          _id: 0,
-          totalTrades: 1,
-          wins: 1,
-          losses: 1,
-          totalPnL: 1,
-          winRate: { $multiply: [{ $divide: ['$wins', '$totalTrades'] }, 100] },
-          avgPnL: { $divide: ['$totalPnL', '$totalTrades'] },
-          avgWin: { $ifNull: ['$avgWin', 0] },
-          avgLoss: { $ifNull: ['$avgLoss', 0] },
-          pnlRatio: {
-            $cond: [
-              { $eq: [{ $ifNull: ['$avgLoss', 0] }, 0] },
-              10,
-              { $min: [{ $divide: ['$avgWin', { $abs: '$avgLoss' }] }, 10] }
-            ]
-          }
-        }
-      },
-      {
-        $addFields: {
-          score: {
-            $add: [
-              { $multiply: [{ $divide: ['$winRate', 100] }, 0.4] },
-              { $multiply: [{ $divide: ['$pnlRatio', 10] }, 0.4] },
-              { $multiply: [{ $min: [{ $divide: ['$totalTrades', 50] }, 1] }, 0.2] }
-            ]
-          }
+          losses: { $sum: { $cond: [{ $eq: ['$result', 'LOSS'] }, 1, 0] } }
         }
       }
     ]);
+
+    return stats[0] || { dailyPnL: 0, tradeCount: 0, wins: 0, losses: 0 };
+  }
+
+  async getConsecutiveLosses(sessionId?: string): Promise<number> {
+    const filter: any = { result: { $ne: null } };
+    // Only count losses from current session to avoid old system's history poisoning
+    if (sessionId) {
+      filter.session_id = new mongoose.Types.ObjectId(sessionId);
+    }
+    const recentTrades = await Trade.find(filter)
+    .sort({ created_at: -1 })
+    .limit(10);
+
+    let streak = 0;
+    for (const trade of recentTrades) {
+      if (trade.result === 'LOSS') {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
   }
 }
 
