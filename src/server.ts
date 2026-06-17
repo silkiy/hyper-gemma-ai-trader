@@ -145,12 +145,14 @@ async function runHybridTradingLoop(mode: SessionMode) {
                 }
                 const highestPnl = Math.max(currentPeak, pnl);
 
+                const minFeeBuffer = 0.015; // Estimated round-trip fee for small margin scalping
+
                 // EXITS
                 if (openTimeMinutes > maxHoldMinutes) {
                   logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4) }, `[TIME EXIT] ${pos.symbol} ${holdSideDisplay} force closed after ${openTimeMinutes.toFixed(0)}min (Hard Limit) | PnL: $${pnl.toFixed(4)}`);
                   peakPnlMap.delete(pos.symbol);
                   await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
-                } else if (openTimeMinutes > timeProfitExitMinutes && pnl > 0) {
+                } else if (openTimeMinutes > timeProfitExitMinutes && pnl > minFeeBuffer) {
                   logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4) }, `[TIME EXIT] ${pos.symbol} ${holdSideDisplay} force closed after ${openTimeMinutes.toFixed(0)}min (Time+Profit) | PnL: +$${pnl.toFixed(4)}`);
                   peakPnlMap.delete(pos.symbol);
                   await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
@@ -168,9 +170,9 @@ async function runHybridTradingLoop(mode: SessionMode) {
                   logger.warn({ symbol: pos.symbol, highest: highestPnl.toFixed(4), pnl: pnl.toFixed(4) }, `[TRAILING STOP] ${pos.symbol} ${holdSideDisplay} secured 20% profit after 50% peak! | PnL: $${pnl.toFixed(4)}`);
                   peakPnlMap.delete(pos.symbol);
                   await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
-                } else if (highestPnl >= targetProfitUsd * 0.3 && pnl <= 0.005) {
-                  // SMART BREAKEVEN TIER 3: Reached 30% target but reversed to nearly 0
-                  logger.warn({ symbol: pos.symbol, highest: highestPnl.toFixed(4), pnl: pnl.toFixed(4) }, `[SMART BREAKEVEN] ${pos.symbol} ${holdSideDisplay} reversed from profit! Securing capital | PnL: $${pnl.toFixed(4)}`);
+                } else if (highestPnl >= targetProfitUsd * 0.3 && pnl <= minFeeBuffer) {
+                  // SMART BREAKEVEN TIER 3: Reached 30% target but reversed. Securing fee!
+                  logger.warn({ symbol: pos.symbol, highest: highestPnl.toFixed(4), pnl: pnl.toFixed(4) }, `[SMART BREAKEVEN] ${pos.symbol} ${holdSideDisplay} reversed from profit! Securing fee buffer | PnL: $${pnl.toFixed(4)}`);
                   peakPnlMap.delete(pos.symbol);
                   await bitgetClient.closePosition(pos.symbol, pos.holdSide as any || 'long', Math.abs(parseFloat(pos.size)).toString());
                 }
@@ -269,69 +271,20 @@ async function runHybridTradingLoop(mode: SessionMode) {
             .map((t: any) => t.symbol);
         } else if (env.SCAN_MODE === "ALL") {
           hotPairs = cryptoTickers.map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "TOP20") {
+        } else if (env.SCAN_MODE.startsWith("HOT")) {
+          const limit = parseInt(env.SCAN_MODE.replace("HOT", "")) || 100;
           hotPairs = cryptoTickers
             .sort(
               (a: any, b: any) =>
                 parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
             )
-            .slice(0, 20)
-            .map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "HOT5") {
-          hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(0, 5)
-            .map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "HOT20") {
-          hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(5, 20)
-            .map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "HOT40") {
-          hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(20, 40)
-            .map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "HOT60") {
-          hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(40, 60)
-            .map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "HOT80") {
-          hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(60, 80)
-            .map((t: any) => t.symbol);
-        } else if (env.SCAN_MODE === "HOT100") {
-          hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(80, 100)
+            .slice(0, limit)
             .map((t: any) => t.symbol);
         } else {
+          // Default fallback
           hotPairs = cryptoTickers
-            .sort(
-              (a: any, b: any) =>
-                parseFloat(b.volume || "0") - parseFloat(a.volume || "0"),
-            )
-            .slice(0, 100)
+            .sort((a: any, b: any) => parseFloat(b.volume || "0") - parseFloat(a.volume || "0"))
+            .slice(0, 50)
             .map((t: any) => t.symbol);
         }
       }

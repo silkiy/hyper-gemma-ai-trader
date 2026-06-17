@@ -92,9 +92,17 @@ export class OrderExecutor {
         if (strategy === 'SWING') {
           slPercent = 0.03;
           tpPercent = 0.10;
-        } else {
+        } else if (strategy === 'INTRADAY') {
           slPercent = 0.015;
           tpPercent = 0.025;
+        } else {
+          // SCALPING: Strict Dollar-Based Stop Loss to minimize losses
+          // Convert the user's max loss USD into a percentage of the notional size
+          slPercent = env.SCALP_MAX_LOSS_USD / targetNotional;
+          // Ensure it's not impossibly tight (minimum 0.2%)
+          slPercent = Math.max(slPercent, 0.002);
+          
+          tpPercent = 0.015; // Scalping TP is usually handled by Trailing Stop anyway
         }
       }
 
