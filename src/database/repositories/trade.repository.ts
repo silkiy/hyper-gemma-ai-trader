@@ -86,6 +86,29 @@ export class TradeRepository {
     }
     return streak;
   }
+
+  async aggregatePairPerformance(): Promise<any[]> {
+    const pipeline = [
+      { $match: { result: { $ne: null } } },
+      { $group: {
+        _id: "$pair",
+        totalTrades: { $sum: 1 },
+        wins: { $sum: { $cond: [{ $eq: ["$result", "WIN"] }, 1, 0] } },
+        losses: { $sum: { $cond: [{ $eq: ["$result", "LOSS"] }, 1, 0] } },
+        totalPnL: { $sum: "$profit_loss" }
+      }},
+      { $project: {
+        pair: "$_id",
+        totalTrades: 1,
+        wins: 1,
+        losses: 1,
+        totalPnL: 1,
+        winRate: { $multiply: [{ $divide: ["$wins", "$totalTrades"] }, 100] },
+        score: { $add: [{ $multiply: [{ $divide: ["$wins", "$totalTrades"] }, 50] }, { $multiply: ["$totalPnL", 10] }] }
+      }}
+    ];
+    return Trade.aggregate(pipeline);
+  }
 }
 
 export const tradeRepository = new TradeRepository();

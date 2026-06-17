@@ -32,7 +32,7 @@ export class QuantEngine {
    * THE QUANT TRINITY v2: Z-Score, Hurst, VWAP + Multi-Layer Confirmation.
    * Now requires RSI, Volume, EMA alignment, and ATR gate before triggering.
    */
-  async evaluateHighSpeed(symbol: string, ohlcv: OHLCV[]): Promise<{
+  async evaluateHighSpeed(symbol: string, macroOHLCV: OHLCV[], microOHLCV: OHLCV[]): Promise<{
     decision: AIDecision | null,
     zScore: number,
     threshold: number,
@@ -40,34 +40,39 @@ export class QuantEngine {
     trioDirection: 'LONG' | 'SHORT' | 'NEUTRAL'
   }> {
     const directive = await directiveRepository.getLatest();
-    if (!directive || ohlcv.length < 50) return { decision: null, zScore: 0, threshold: 0, hurst: 0.5, trioDirection: 'NEUTRAL' };
+    if (!directive || microOHLCV.length < 50 || macroOHLCV.length < 50) return { decision: null, zScore: 0, threshold: 0, hurst: 0.5, trioDirection: 'NEUTRAL' };
 
-    const prices = ohlcv.map(d => d.c);
-    const highs = ohlcv.map(d => d.h);
-    const lows = ohlcv.map(d => d.l);
-    const volumes = ohlcv.map(d => d.v);
+    // ═══════════════════════════════════════════════
+    // 1. MACRO LENS (Regime & Trend Direction)
+    // ═══════════════════════════════════════════════
+    const macroPrices = macroOHLCV.map(d => d.c);
+    const macroLongWindow = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 50 : 100;
+    const macroPricesLong = macroPrices.slice(-macroLongWindow);
+    const hurst = QuantUtils.hurstExponent(macroPricesLong); // Hurst is purely macro
+
+    const macroLastPrice = macroPrices[macroPrices.length - 1]!;
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    const todayOHLCVMacro = macroOHLCV.filter(d => d.t >= startOfToday.getTime());
+    const vwap = QuantUtils.calculateVWAP(todayOHLCVMacro.length > 0 ? todayOHLCVMacro : macroOHLCV.slice(-20));
+    const vwapDev = QuantUtils.vwapDeviation(macroLastPrice, vwap); // VWAP is purely macro
+
+    // ═══════════════════════════════════════════════
+    // 2. MICRO LENS (Precision Entry Trigger)
+    // ═══════════════════════════════════════════════
+    const prices = microOHLCV.map(d => d.c);
+    const highs = microOHLCV.map(d => d.h);
+    const lows = microOHLCV.map(d => d.l);
+    const volumes = microOHLCV.map(d => d.v);
     const lastPrice = prices[prices.length - 1]!;
     const prevPrice = prices.length > 1 ? prices[prices.length - 2]! : lastPrice;
 
-    // 1. DUAL WINDOW DATA
     const shortWindow = 20;
-    const longWindow = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 50 : 100;
-
     const pricesShort = prices.slice(-shortWindow);
-    const pricesLong = prices.slice(-longWindow);
 
-    // 2. CALCULATE TRINITY PRIMITIVES
     const zScore = QuantUtils.calculateZScore(pricesShort);
-    const hurst = QuantUtils.hurstExponent(pricesLong);
 
-    // 3. DAILY VWAP
-    const startOfToday = new Date();
-    startOfToday.setUTCHours(0, 0, 0, 0);
-    const todayOHLCV = ohlcv.filter(d => d.t >= startOfToday.getTime());
-    const vwap = QuantUtils.calculateVWAP(todayOHLCV.length > 0 ? todayOHLCV : ohlcv.slice(-20));
-    const vwapDev = QuantUtils.vwapDeviation(lastPrice, vwap);
-
-    // 4. KALMAN TREND + MOMENTUM CROSS-VALIDATION
+    // KALMAN TREND + MOMENTUM CROSS-VALIDATION (Micro)
     const kalmanPrice = QuantUtils.applyKalmanFilter(pricesShort, directive.kalman_aggressiveness);
     const lookback = Math.min(10, pricesShort.length - 1);
     const momentumRef = pricesShort[pricesShort.length - 1 - lookback] ?? lastPrice;
@@ -102,13 +107,13 @@ export class QuantEngine {
 
     // 6. REGIME-AWARE LOGIC
     let hurstThreshold = 0.60;
-    if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) hurstThreshold = 0.50;
+    if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) hurstThreshold = 0.58; // Must be strongly trending
     else if (env.TRADING_STRATEGY === TradingStrategy.INTRADAY) hurstThreshold = 0.55;
 
     const isTrending = hurst >= hurstThreshold;
 
     let strategyMinThreshold = 1.8;
-    if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) strategyMinThreshold = 1.5;
+    if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) strategyMinThreshold = 1.8; // Safer Z-Score for mean reversion
     else if (env.TRADING_STRATEGY === TradingStrategy.SWING) strategyMinThreshold = 2.0;
 
     const defaultZThreshold = 2.2;
@@ -123,17 +128,17 @@ export class QuantEngine {
 
     // MODE A: TREND FOLLOWING (Hurst >= Threshold)
     if (isTrending) {
-      strategyNote = 'Trend Following (Hurst Driven)';
+      strategyNote = 'Trend Following (Hurst Driven + Micro Pullback)';
 
-      // LONG: Kalman bullish + above VWAP (Pure Trinity)
+      // LONG: Kalman bullish + above VWAP + Micro Pullback (zScore <= 0.5)
       if (directive.bias === 'LONG' || directive.bias === 'NEUTRAL') {
-        if (isKalmanBullish && vwapDev > 0 && hasVolumeSpike) {
+        if (isKalmanBullish && vwapDev > 0 && zScore <= 0.5 && hasVolumeSpike) {
           decision = TradeAction.LONG;
         }
       }
-      // SHORT: Kalman bearish + below VWAP (Pure Trinity)
+      // SHORT: Kalman bearish + below VWAP + Micro Pullback (zScore >= -0.5)
       if (decision === TradeAction.SKIP && (directive.bias === 'SHORT' || directive.bias === 'NEUTRAL')) {
-        if (isKalmanBearish && vwapDev < 0 && hasVolumeSpike) {
+        if (isKalmanBearish && vwapDev < 0 && zScore >= -0.5 && hasVolumeSpike) {
           decision = TradeAction.SHORT;
         }
       }

@@ -50,8 +50,21 @@ export class StrategyGovernor {
         }
       `;
 
-      const response = await ollamaClient.generateValidatedJson(prompt, validateBattleDirective);
-      
+      let response: any;
+
+      if (env.MOCK_AI) {
+        logger.warn('🤖 PURE QUANT MODE ACTIVE: Strategy Governor bypassing AI to avoid overheat/latency.');
+        response = {
+          bias: "NEUTRAL",
+          z_score_threshold: isScalping ? 1.5 : 2.0,
+          kalman_aggressiveness: 0.1,
+          max_leverage: 50,
+          allowed_symbols: [], // Empty means all allowed
+          reasoning: "PURE QUANT MODE: Using optimal hardcoded defaults."
+        };
+      } else {
+        response = await ollamaClient.generateValidatedJson(prompt, validateBattleDirective);
+      }
       // 2. Save Directive
       await directiveRepository.create({
         bias: response.bias,

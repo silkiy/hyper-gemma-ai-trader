@@ -35,9 +35,10 @@ export class OllamaClient {
       prompt: prompt,
       stream: false,
       options: {
-        temperature: 0.1,
-        top_k: 40,
-        top_p: 0.85,
+        temperature: 0.6, // Gemma 4 optimized (0.6 - 1.0)
+        top_k: 64,
+        top_p: 0.95,
+        num_predict: 250, // Save VRAM & keep responses concise
       },
     };
 

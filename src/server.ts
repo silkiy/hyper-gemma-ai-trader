@@ -334,13 +334,14 @@ async function runHybridTradingLoop(mode: SessionMode) {
             .slice(0, 100)
             .map((t: any) => t.symbol);
         }
-        pairsToScan = hotPairs;
       }
+      const pairsToScan = hotPairs;
 
-      let interval = '1h';
-      if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) interval = '1m';
-      else if (env.TRADING_STRATEGY === TradingStrategy.INTRADAY) interval = '15m';
-      else if (env.TRADING_STRATEGY === TradingStrategy.SWING) interval = '1h';
+      let macroInterval = '1h';
+      let microInterval = '1h';
+      if (env.TRADING_STRATEGY === TradingStrategy.SCALPING) { macroInterval = '15m'; microInterval = '1m'; }
+      else if (env.TRADING_STRATEGY === TradingStrategy.INTRADAY) { macroInterval = '1h'; microInterval = '15m'; }
+      else if (env.TRADING_STRATEGY === TradingStrategy.SWING) { macroInterval = '4h'; microInterval = '1h'; }
 
       for (const pair of pairsToScan) {
         try {
@@ -349,10 +350,15 @@ async function runHybridTradingLoop(mode: SessionMode) {
             continue;
           }
 
-          const historyLimit = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 50 : 100;
-          const ohlcv = await quantEngine.getOHLCVHistory(pair, interval, historyLimit);
+          const macroLimit = 100;
+          const microLimit = env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 50 : 100;
           
-          const { decision: quantDecision, zScore, threshold, hurst, trioDirection: mathDir } = await quantEngine.evaluateHighSpeed(pair, ohlcv);
+          const [macroOHLCV, microOHLCV] = await Promise.all([
+            quantEngine.getOHLCVHistory(pair, macroInterval, macroLimit),
+            quantEngine.getOHLCVHistory(pair, microInterval, microLimit)
+          ]);
+          
+          const { decision: quantDecision, zScore, threshold, hurst, trioDirection: mathDir } = await quantEngine.evaluateHighSpeed(pair, macroOHLCV, microOHLCV);
           
           // 1.1 ALPHA DETECTION: High Hurst (>0.70) indicates independent momentum (Meme behavior)
           const isAlpha = hurst > 0.70;

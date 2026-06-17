@@ -26,10 +26,10 @@ export async function startMonitoringApi() {
       }
 
       // Sort by score descending
-      const sortedData = performance.sort((a, b) => b.score - a.score);
+      const sortedData = performance.sort((a: any, b: any) => b.score - a.score);
 
       // Add recommendations
-      const dataWithRecs = sortedData.map((item, index) => {
+      const dataWithRecs = sortedData.map((item: any, index: number) => {
         let recommendation = null;
         if (index === 0 && item.totalTrades >= 5) {
           recommendation = "FOCUS_CANDIDATE";

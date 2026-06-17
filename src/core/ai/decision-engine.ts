@@ -71,9 +71,31 @@ export class DecisionEngine {
         `;
       }
 
-      // 6. Get AI Decision
-      const aiDecision = await ollamaClient.generateDecision(prompt);
-      aiDecision.symbol = pair;
+      // 6. Get AI Decision or Pure Quant Override
+      let aiDecision: AIDecision;
+      
+      if (env.MOCK_AI) {
+        logger.warn({ pair, mathDir }, '🤖 PURE QUANT MODE ACTIVE: Bypassing AI and executing math direction directly.');
+        aiDecision = {
+          symbol: pair,
+          decision: mathDir === 'LONG' ? TradeAction.LONG : (mathDir === 'SHORT' ? TradeAction.SHORT : TradeAction.SKIP),
+          confidence: 'HIGH',
+          confidence_score: 95,
+          market_regime: MarketRegime.TRENDING,
+          risk_level: RiskLevel.MEDIUM,
+          leverage_suggestion: 50, // Let executor adjust to max allowed
+          position_size: PositionSize.NORMAL,
+          entry_reason: 'PURE QUANT MODE: Direct execution based on tuned Quant Engine (Hurst, VWAP, Kalman) to avoid AI latency and overheat.',
+          risk_factors: ['AI validation bypassed'],
+          stop_loss_logic: 'System defaults',
+          take_profit_logic: 'System defaults',
+          self_reflection: 'Executing raw mathematical signal.',
+          final_summary: `Proceeding with ${mathDir} signal from QuantEngine.`,
+        };
+      } else {
+        aiDecision = await ollamaClient.generateDecision(prompt);
+        aiDecision.symbol = pair;
+      }
 
       // 7. Final Validation with Risk Manager (lightweight — pre-check already passed)
       const finalDecision = riskManager.validateDecision(aiDecision, accountStatus, currentMode);

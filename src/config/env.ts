@@ -23,7 +23,7 @@ const envSchema = z.object({
   MAX_TRADE_ALLOCATION: z.string().default('0.20').transform(Number), // Default 20% of balance
   MIN_TPSL_NOTIONAL: z.string().default('10').transform(Number), // Default 10 USDT for SL/TP
   TRADING_STRATEGY: z.enum(['SCALPING', 'INTRADAY', 'SWING']).default('INTRADAY'),
-  SCAN_MODE: z.enum(['VIP', 'HOT50', 'ALL']).default('ALL'),
+  SCAN_MODE: z.string().default('ALL'),
   TRADING_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
   SCALP_MAX_HOLD_MINUTES: z.string().default('10').transform(Number),
   SCALP_PROFIT_EXIT_MINUTES: z.string().default('5').transform(Number),
@@ -31,3 +31,4 @@ const envSchema = z.object({
   SCALP_MAX_LOSS_USD: z.string().default('0.03').transform(Number),
 });
 
+export const env = envSchema.parse(process.env);
