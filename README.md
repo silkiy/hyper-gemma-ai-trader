@@ -485,13 +485,18 @@ Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 - **Auto-Leverage Optimization** — Menaikkan leverage otomatis jika saran AI terlalu rendah:
   - `ceil(targetNotional / (available * 0.98))` — 2% buffer
   - Capped by `maxExchangeLeverage` per simbol
+- **Hard Leverage Cap** — Membatasi leverage absolut maksimal 25x (terlepas dari saran AI/directive)
 - **2% Safety Buffer** — Final affordability check: `marginUsed = targetNotional / finalLeverage` vs `available * 0.98`
 - **Detailed Sizing Log** — Mencatat `targetNotional`, `marginUsed`, `finalLeverage`, dan `qty` per order
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
-- **Price Tracking** — Mengembalikan harga eksekusi aktual untuk pencatatan entry price yang akurat
+- **Execution Price Retries** — Melakukan hingga 3 kali percobaan untuk fetch execution price dari fill history
+- **ATR-Based Dynamic SL/TP** — Menyesuaikan Take Profit dan Stop Loss menggunakan ATR jika tersedia:
+  - `SL = 1.5x ATR` (capped max 5%)
+  - `TP = 2.5x ATR` (capped max 15%)
+  - Fallback ke persentase statis (atau USD max loss untuk Scalping) jika ATR tidak tersedia
+  - Menambahkan *Slippage Buffer* 0.01% untuk eksekusi yang lebih aman
 - **Atomic SL/TP (Preset)** — SL/TP dikirim **dalam request yang sama** dengan market order (bukan Plan Order terpisah):
   - `presetStopLossPrice` + `presetTakeProfitPrice` dimasukkan ke body `place-order`
-  - Semua strategi: SL 1.5%, TP 2.5% (RR ~1:1.67)
   - **Benefit:** SL/TP dijamin terpasang, tidak ada race condition atau partial fill
 
 ---
@@ -617,12 +622,15 @@ runHybridTradingLoop(mode) {
         - Cek open trades di DB vs live positions di exchange
         - Jika posisi hilang → fetch fill history → record PnL, exit_price, result, fees
         - Log: [TRADE CLOSED] BTCUSDT LONG → TP_HIT | PnL: +0.52 USDT
-     3. Cek Account & Risk Status
+     3. Capital Shield & Tactical Exits:
+        - BACKUP SHIELD: Exit force loss jika PnL exceed 2x threshold (Bitget SL gagal)
+        - TIME/PROFIT EXIT: Max Hold / Profit hit / Trailing Stop / Smart Breakeven
+     4. Cek Account & Risk Status
         - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 10s → Retry
-     4. Determine Pairs to Scan:
+     5. Determine Pairs to Scan:
         - SINGLE MODE: Hanya `FOCUS_PAIR`
         - MULTI MODE: Fetch tickers → Filter RWA blacklist → Apply SCAN_MODE
-     5. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
+     6. Fetch All Tickers → Filter berdasarkan SCAN_MODE:
        - VIP: 17 major pairs (BTC, ETH, BNB, XRP, SUI, TON, dll)
        - HOT5: Top 5 by volume
        - HOT20: Rank 6-20 by volume
@@ -635,13 +643,16 @@ runHybridTradingLoop(mode) {
           - MODE A (Trending, H ≥ threshold): Kalman + VWAP momentum → Hit!
           - MODE B (Ranging, H < threshold): Z-Score extreme + Bounce + VWAP value area → Hit!
           - Return trioDirection (Kalman direction) untuk sinkronisasi guard
-       b. 🤖 AI SNIPER (Gemma confirms, dengan mathDir dari Trinity):
+       b. 🛡️ VOLUME GATE & MOMENTUM GUARD:
+          - Skip jika volume 24h < $100k
+          - Block trade jika melawan momentum ekstrem (> ±5% 24h)
+       c. 🤖 AI SNIPER (Gemma confirms, dengan mathDir & isAlpha):
            - Kirim ke Decision Engine + mathDir → Gemma validasi
            - GEMMA_FLIP_BLOCKED guard menggunakan mathDir dari step (a)
            - Jika LONG/SHORT → TACTICAL STRIKE → Execute (Atomic SL/TP)
            - Jika SKIP/WAIT → TACTICAL VETO → Skip
-        c. ⏱️ Micro-delay 250ms antar pair
-     6. Wait 10s → Ulang dari step 2
+        d. ⏱️ Micro-delay 250ms antar pair
+     7. Wait 10s → Ulang dari step 2
     * On crash → Wait 5s → Retry
   }
 }
@@ -664,6 +675,10 @@ runHybridTradingLoop(mode) {
 **Engine Features:**
 - **Real-time Trinity Pulse** — Visual tracking Z-Score + Hurst + Regime setiap pair di terminal (`\r` overwrite)
 - **Trinity-First, AI-Second** — QuantEngine Trinity (milidetik) → Gemma AI (detik) hanya jika Trinity signal aktif
+- **Capital Shield** — Dollar-Loss Exit backup ($ Max Loss) jika Bitget SL gagal (triggers at 2x threshold)
+- **Tactical Exits** — Manajemen penutupan posisi pintar (Time limit, Profit target, Trailing Stop, Smart Breakeven)
+- **Volume Gate & Momentum Guard** — Filter koin illiquid (< $100k 24h volume) dan blokir entry melawan momentum ekstrem (> ±5% 24h)
+- **Alpha Detection** — Mendeteksi koin dengan independen momentum (Hurst > 0.70)
 - **Smart Safety Block** — Block untuk `Blocked: Safety` DAN `Blocked: Max positions`, wait 10s
 - **Auto-Close Detection** — Setiap cycle, cek open trades vs live positions → auto-record PnL, result, exit_reason via fill history
 - **RWA Blacklist** — Otomatis filter saham/komoditas (isRwa) dari scan, hanya crypto murni yang di-scan
@@ -832,6 +847,10 @@ npm run dev
 | `SCAN_MODE` | Mode pemindaian market: `VIP` / `TOP20` / `HOT5` / `HOT20` / `HOT40` / `HOT60` / `HOT80` / `HOT100` / `ALL` | `VIP` |
 | `TRADING_MODE_PAIR` | Mode pair: `SINGLE` (satu koin) atau `MULTI` (scan banyak) | `MULTI` |
 | `FOCUS_PAIR` | Koin fokus saat `TRADING_MODE_PAIR=SINGLE` (e.g. `BTCUSDT`) | — (wajib jika SINGLE) |
+| `SCALP_MAX_HOLD_MINUTES` | Durasi hold maksimal (menit) untuk Scalping | `10` |
+| `SCALP_PROFIT_EXIT_MINUTES` | Waktu exit profit (menit) untuk Scalping | `5` |
+| `SCALP_PROFIT_EXIT_USD` | Target profit (USD) untuk Scalping | `0.05` |
+| `SCALP_MAX_LOSS_USD` | Batas loss (USD) untuk Scalping | `0.03` |
 
 ---
 
@@ -857,12 +876,21 @@ npm run dev
 - [x] **Atomic SL/TP** (preset params dalam request market order, bukan plan order terpisah)
 - [x] **TPSL Order Support** (`place-tpsl-order` endpoint dengan holdSide + planType)
 - [x] **trioDirection Passthrough** (QuantEngine → server.ts → DecisionEngine — single source of truth)
+- [x] **VWAP Value/Premium Area Detection** (daily reset 00:00 UTC)
+- [x] **Trade Lifecycle Tracking** (auto-detect closed positions via Bitget fill history → record exit_price, realized_pnl, result, fees)
+- [x] **Single Pair Mode** (`TRADING_MODE_PAIR=SINGLE` + `FOCUS_PAIR` untuk fokus satu koin)
+- [x] **RWA Blacklist** (otomatis filter saham/komoditas dari scan menggunakan `getExchangeInfo().isRwa`)
+- [x] **Pair Performance Analytics** (aggregatePairPerformance: win rate, avg PnL, PnL ratio, composite score per pair)
+- [x] **Capital Shield** (Dollar-Loss Exit backup fallback berdasarkan `SCALP_MAX_LOSS_USD`)
+- [x] **Tactical Exits** (Smart Breakeven, Trailing Stop, Time & Profit Exits)
+- [x] **ATR-Based Dynamic SL/TP** (1.5x ATR SL, 2.5x ATR TP dengan slippage buffer 0.01%)
+- [x] **Volume Gate & Momentum Guard** (Filter volume < $100k, block melawan trend ekstrem ±5%)
+- [x] **Execution Price Retry** (3x attempt fetch actual fill history price)
 - [x] **holdSide/marginUsed Mapping** (field posisi dari Bitget V2 dipetakan akurat)
 - [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
 - [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
 - [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
 - [x] **Adaptive Kalman Filter** (volatility-adjusted measureNoise dengan local std dev)
-- [x] **Multi-Scale Hurst Exponent** (R/S analysis pada 4 skala: 8, 16, 32, 64 candles + OLS regression)
 - [x] **WLS Price Velocity** (Weighted Least Squares dengan exponential decay weights)
 - [x] **Regime Context Prompt Injection** (Hurst + regime + trioDirection disuntikkan ke prompt Gemma)
 - [x] **Validated JSON for Both AI Schemas** (AIDecision + BattleDirective via Zod)
