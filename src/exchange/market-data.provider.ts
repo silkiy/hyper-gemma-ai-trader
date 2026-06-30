@@ -38,7 +38,7 @@ export class MarketDataProvider {
       const highPrices = klines.map((c: any) => parseFloat(c[2]));
       const lowPrices = klines.map((c: any) => parseFloat(c[3]));
 
-      const currentPrice = closePrices[closePrices.length - 1];
+      const currentPrice = closePrices[closePrices.length - 1] || 0;
       const ema20 = indicatorEngine.calculateEMA(closePrices, 20);
       const ema50 = indicatorEngine.calculateEMA(closePrices, 50);
       const rsi = indicatorEngine.calculateRSI(closePrices, 14);
@@ -58,7 +58,7 @@ export class MarketDataProvider {
 
       return {
         pair,
-        current_price: currentPrice,
+        current_price: currentPrice || 0,
         ema20,
         ema50,
         rsi,
@@ -162,8 +162,10 @@ export class MarketDataProvider {
         }
       }
 
-      const marginBalance = walletBalance + totalUnrealizedPnL; 
-      const equity = walletBalance + totalUnrealizedPnL; 
+      // equity = accountEquity (sudah termasuk unrealized PnL dari Bitget)
+      // Jangan tambahkan totalUnrealizedPnL lagi (double counting)
+      const equity = walletBalance; 
+      const marginBalance = walletBalance; // Gunakan walletBalance sebagai marginBalance
       const marginRatio = marginBalance > 0 ? (totalMaintenanceMargin / marginBalance) * 100 : 0;
 
       // 4. Calculate Real Performance Metrics from Database

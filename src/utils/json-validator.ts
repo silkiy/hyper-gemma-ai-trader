@@ -74,6 +74,7 @@ export function extractJsonFromResponse(response: string): any {
     const lastBrace = response.lastIndexOf('}');
 
     if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+      console.error(`\n[AI RAW RESPONSE ERROR]:\n${response}\n`);
       throw new Error('No JSON found in response');
     }
 

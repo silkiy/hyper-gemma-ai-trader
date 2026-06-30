@@ -55,7 +55,7 @@ class FinalVerificationEngine {
     // 3. Verify Cooldown Manager
     logger.info('Test 3: Cooldown Logic');
     try {
-      cooldownManager.startCooldown(30);
+      cooldownManager.startCooldown(30, 'Verification test');
       const isActive = cooldownManager.isCooldownActive();
       verificationResults.push({ feature: 'Cooldown Manager', status: isActive ? 'PASS' : 'FAIL', detail: 'Cooldown activation verified' });
     } catch (e: any) {

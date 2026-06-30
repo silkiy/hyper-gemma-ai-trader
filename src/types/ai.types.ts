@@ -21,6 +21,7 @@ export type OllamaRequest = {
   model: string;
   prompt: string;
   stream: boolean;
+  format?: 'json' | string;
   options?: {
     temperature?: number;
     top_k?: number;

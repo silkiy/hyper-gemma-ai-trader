@@ -97,7 +97,8 @@ export class PromptBuilder {
       ${responseSchema}
       
       Eksekusi sekarang. Ikuti Quant Direction.
-    `;
+      RETURN ONLY VALID JSON. NO MARKDOWN. NO EXPLANATIONS.
+    `.trim();
   }
 }
 

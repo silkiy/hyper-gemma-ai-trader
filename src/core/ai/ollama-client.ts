@@ -20,6 +20,9 @@ import {
 export class OllamaClient {
   private baseUrl: string;
   private model: string;
+  private retryCount: number = 0;
+  private maxRetries: number = 3;
+  private fallbackMode: boolean = false;
 
   constructor() {
     this.baseUrl = env.OLLAMA_BASE_URL;
@@ -27,61 +30,97 @@ export class OllamaClient {
   }
 
   /**
-   * Internal helper for raw JSON generation.
+   * Internal helper for raw JSON generation with retry and fallback.
    */
   private async generateRawJson(prompt: string): Promise<any> {
     const request: OllamaRequest = {
       model: this.model,
       prompt: prompt,
       stream: false,
+      format: "json",
       options: {
-        temperature: 0.6, // Gemma 4 optimized (0.6 - 1.0)
+        temperature: 0.6,
         top_k: 64,
         top_p: 0.95,
-        num_predict: 250, // Save VRAM & keep responses concise
+        num_predict: 800,
       },
     };
 
-    try {
-      logger.info({ model: this.model }, "Sending request to Ollama");
-      const response = await axios.post<OllamaResponse>(
-        `${this.baseUrl}/api/generate`,
-        request,
-        { timeout: 300000 }
-      );
-      return extractJsonFromResponse(response.data.response);
-    } catch (error: any) {
-      const errorMsg = error.response?.data?.error || error.message;
-      logger.error(`Ollama raw generation failed: ${errorMsg}`);
-      throw new Error(`Ollama API Error: ${errorMsg}`);
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        logger.info({ model: this.model, attempt }, "Sending request to Ollama");
+        const response = await axios.post<OllamaResponse>(
+          `${this.baseUrl}/api/generate`,
+          request,
+          { timeout: 300000 }
+        );
+        this.retryCount = 0; // Reset on success
+        this.fallbackMode = false;
+        return extractJsonFromResponse(response.data.response);
+      } catch (error: any) {
+        const errorMsg = error.response?.data?.error || error.message;
+        logger.warn({ attempt, maxRetries: this.maxRetries, error: errorMsg }, "Ollama request failed");
+        
+        if (attempt < this.maxRetries) {
+          // Exponential backoff
+          const backoffMs = Math.pow(2, attempt) * 1000;
+          logger.info({ backoffMs }, "Retrying after backoff...");
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        } else {
+          // All retries failed - enable fallback mode
+          this.retryCount++;
+          if (this.retryCount >= 3) {
+            logger.error("Ollama failed 3 consecutive times, enabling fallback mode");
+            this.fallbackMode = true;
+          }
+          throw new Error(`Ollama API Error after ${this.maxRetries} attempts: ${errorMsg}`);
+        }
+      }
     }
+  }
+
+  /**
+   * Get fallback decision when Ollama is unavailable
+   */
+  private getFallbackDecision(): AIDecision {
+    logger.warn("Using fallback decision - AI validation skipped");
+    return {
+      decision: TradeAction.SKIP,
+      confidence: 'LOW',
+      confidence_score: 50,
+      market_regime: MarketRegime.UNCLEAR,
+      risk_level: RiskLevel.HIGH,
+      leverage_suggestion: 1,
+      position_size: PositionSize.SMALL,
+      entry_reason: "Fallback: Ollama unavailable, skipping trade for safety",
+      risk_factors: ["AI validation bypassed due to Ollama failure"],
+      stop_loss_logic: "N/A",
+      take_profit_logic: "N/A",
+      self_reflection: "System in fallback mode",
+      final_summary: "Ollama unavailable - trade skipped for safety",
+    };
   }
 
   /**
    * Specifically for trading decisions.
    */
   async generateDecision(prompt: string): Promise<AIDecision> {
-    if (env.MOCK_AI) {
-      logger.info("MOCK_AI is enabled, returning mock decision");
-      return {
-        decision: TradeAction.SKIP,
-        confidence: 'LOW',
-        confidence_score: 90,
-        market_regime: MarketRegime.RANGING,
-        risk_level: RiskLevel.LOW,
-        leverage_suggestion: 1,
-        position_size: PositionSize.SMALL,
-        entry_reason: "Mock: AI is disabled in environment.",
-        risk_factors: ["N/A"],
-        stop_loss_logic: "N/A",
-        take_profit_logic: "N/A",
-        self_reflection: "Mock decision",
-        final_summary: "Mocking AI response",
-      };
+    if (env.MOCK_AI || this.fallbackMode) {
+      if (this.fallbackMode) {
+        logger.warn("Fallback mode active - returning safe SKIP decision");
+      } else {
+        logger.info("MOCK_AI is enabled, returning mock decision");
+      }
+      return this.getFallbackDecision();
     }
 
-    const rawJson = await this.generateRawJson(prompt);
-    return validateAIDecision(rawJson);
+    try {
+      const rawJson = await this.generateRawJson(prompt);
+      return validateAIDecision(rawJson);
+    } catch (error: any) {
+      logger.error({ error: error.message }, "AI decision generation failed, using fallback");
+      return this.getFallbackDecision();
+    }
   }
 
   /**

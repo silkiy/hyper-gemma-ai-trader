@@ -2,19 +2,22 @@ import axios from 'axios';
 import { createHmac } from 'crypto';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { CircuitBreaker } from '../core/utils/circuit-breaker.js';
 
 export class BitgetClient {
   private apiKey: string;
   private secretKey: string;
   private passphrase: string;
   private baseUrl: string;
-  private clientOidPrefix: string = 'bot'; // Default prefix
+  private clientOidPrefix: string = 'bot';
+  private circuitBreaker: CircuitBreaker;
 
   constructor() {
     this.apiKey = env.BITGET_API_KEY || '';
     this.secretKey = env.BITGET_SECRET_KEY || '';
     this.passphrase = env.BITGET_PASSPHRASE || '';
     this.baseUrl = env.BITGET_BASE_URL || 'https://api.bitget.com';
+    this.circuitBreaker = new CircuitBreaker(5, 60000, 3); // 5 failures, 1 min reset
 
     if (!this.apiKey || !this.secretKey || !this.passphrase) {
       logger.error('CRITICAL: Bitget credentials (Key, Secret, or Passphrase) missing in .env');
@@ -26,6 +29,16 @@ export class BitgetClient {
    */
   setPrefix(prefix: string) {
     this.clientOidPrefix = prefix;
+  }
+
+  /**
+   * Check if circuit breaker allows requests
+   */
+  private checkCircuitBreaker(): void {
+    if (this.circuitBreaker.isOpen()) {
+      const stats = this.circuitBreaker.getStats();
+      throw new Error(`Circuit breaker OPEN - API temporarily unavailable. State: ${stats.state}, Failures: ${stats.failureCount}`);
+    }
   }
 
   private getTimestamp(): string {
@@ -54,7 +67,13 @@ export class BitgetClient {
     return symbol.replace('-', '').replace('/', '').replace('_UMCBL', '').toUpperCase();
   }
 
-  async getCandles(symbol: string, granularity: string = '1H', limit: number = 100) {
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async getCandles(symbol: string, granularity: string = '1H', limit: number = 100, retryCount: number = 0): Promise<any[]> {
+    this.checkCircuitBreaker();
+    
     const formattedSymbol = this.formatSymbol(symbol);
     let bitgetGranularity = granularity;
     if (granularity.toLowerCase().endsWith('m')) bitgetGranularity = granularity.toLowerCase();
@@ -64,9 +83,20 @@ export class BitgetClient {
     try {
       const response = await axios.get(`${this.baseUrl}${requestPath}`);
       if (response.data.code !== '00000') throw new Error(response.data.msg);
+      this.circuitBreaker.recordSuccess();
       return response.data.data;
     } catch (error: any) {
       const msg = error.response?.data?.msg || error.message;
+      
+      // Rate limit handling with exponential backoff
+      if (error.response?.status === 429 && retryCount < 3) {
+        const backoffMs = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+        logger.warn({ symbol, retryCount: retryCount + 1, backoffMs }, 'Rate limited, retrying...');
+        await this.delay(backoffMs);
+        return this.getCandles(symbol, granularity, limit, retryCount + 1);
+      }
+      
+      this.circuitBreaker.recordFailure();
       logger.error({ symbol, error: msg }, 'Failed to fetch klines from Bitget V2');
       throw error;
     }
@@ -173,7 +203,7 @@ export class BitgetClient {
       orderType: order.orderType,
       size: order.size,
       price: order.orderType === 'limit' ? order.price : '',
-      presetStopSurplusPrice: order.presetTakeProfitPrice || '', // Take Profit
+      presetTakeProfitPrice: order.presetTakeProfitPrice || '', // Take Profit
       presetStopLossPrice: order.presetStopLossPrice || '',       // Stop Loss
       clientOid: `${this.clientOidPrefix}-${Date.now()}`
     });
@@ -251,6 +281,75 @@ export class BitgetClient {
       const msg = error.response?.data?.msg || error.message;
       logger.error({ error: msg }, 'Failed to fetch Bitget V2 positions');
       throw error;
+    }
+  }
+
+  async getPendingOrders(symbol?: string): Promise<any[]> {
+    const timestamp = this.getTimestamp();
+    // V2 endpoint for pending orders is orders-pending
+    let requestPath = '/api/v2/mix/order/orders-pending?productType=USDT-FUTURES';
+    if (symbol) {
+      const formattedSymbol = this.formatSymbol(symbol);
+      requestPath += `&symbol=${formattedSymbol}`;
+    }
+    const signature = this.generateSignature(timestamp, 'GET', requestPath);
+    
+    try {
+      const response = await axios.get(`${this.baseUrl}${requestPath}`, {
+        headers: this.getHeaders(timestamp, signature)
+      });
+      if (response.data.code !== '00000') throw new Error(response.data.msg);
+      return response.data.data?.entrustedList || response.data.data || [];
+    } catch (error: any) {
+      const msg = error.response?.data?.msg || error.message;
+      // Demote to debug to prevent log spam if endpoint changes or fails
+      logger.debug({ error: msg }, 'Failed to fetch pending orders');
+      return [];
+    }
+  }
+
+  async cancelOrder(symbol: string, orderId: string): Promise<any> {
+    if (env.TRADING_MODE === 'PAPER') {
+      logger.info({ symbol, orderId }, 'PAPER MODE: Simulating order cancel');
+      return { code: '00000' };
+    }
+
+    const formattedSymbol = this.formatSymbol(symbol);
+    const timestamp = this.getTimestamp();
+    const requestPath = '/api/v2/mix/order/cancel-order';
+    const body = JSON.stringify({
+      symbol: formattedSymbol,
+      productType: 'USDT-FUTURES',
+      orderId: orderId
+    });
+    const signature = this.generateSignature(timestamp, 'POST', requestPath, body);
+    
+    try {
+      const response = await axios.post(`${this.baseUrl}${requestPath}`, body, {
+        headers: this.getHeaders(timestamp, signature)
+      });
+      if (response.data.code !== '00000') throw new Error(response.data.msg);
+      logger.info({ symbol, orderId }, 'Order cancelled successfully');
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data?.msg || error.message;
+      logger.error({ symbol, orderId, error: msg }, 'Failed to cancel order');
+      throw error;
+    }
+  }
+
+  async cancelAllOrders(symbol?: string): Promise<void> {
+    try {
+      const pendingOrders = await this.getPendingOrders(symbol);
+      for (const order of pendingOrders) {
+        try {
+          await this.cancelOrder(order.symbol, order.orderId);
+        } catch (e: any) {
+          logger.debug({ orderId: order.orderId }, 'Failed to cancel order');
+        }
+      }
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Failed to cancel all orders');
     }
   }
 

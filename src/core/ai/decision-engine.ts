@@ -51,10 +51,11 @@ export class DecisionEngine {
       // 4. Build Prompt
       const pricesRawPrompt = await bitgetClient.getPriceHistory(pair, env.TRADING_STRATEGY === 'SCALPING' ? '1m' : '1h', 100);
       const hurstValPrompt = QuantUtils.hurstExponent(pricesRawPrompt);
+      const regime = isAlpha ? 'ALPHA' : (hurstValPrompt > (env.TRADING_STRATEGY === 'SCALPING' ? 0.50 : 0.60) ? 'TRENDING' : 'RANGING');
 
       let prompt = promptBuilder.buildTradePrompt(marketData, accountStatus, memories, {
         hurst: hurstValPrompt,
-        regime: isAlpha ? 'ALPHA' : (hurstValPrompt > (currentMode === SessionMode.NORMAL ? 0.60 : 0.50) ? 'TRENDING' : 'RANGING'),
+        regime,
         trioDirection: mathDir 
       });
 
@@ -97,7 +98,20 @@ export class DecisionEngine {
         aiDecision.symbol = pair;
       }
 
-      // 7. Final Validation with Risk Manager (lightweight — pre-check already passed)
+      // 7. GEMMA_FLIP_BLOCKED: Prevent AI from flipping direction during TRENDING regime
+      if (regime === 'TRENDING' && mathDir !== 'NEUTRAL') {
+        if (aiDecision.decision !== mathDir && aiDecision.decision !== TradeAction.SKIP && aiDecision.decision !== TradeAction.WAIT) {
+          logger.warn({ 
+            mathDir, 
+            aiDecision: aiDecision.decision,
+            pair 
+          }, '⚠️ GEMMA_FLIP_BLOCKED: AI attempted to flip direction during TRENDING regime');
+          aiDecision.decision = TradeAction.WAIT;
+          aiDecision.final_summary = `GEMMA_FLIP_BLOCKED: Force WAIT - Math direction is ${mathDir}, AI suggested ${aiDecision.decision}`;
+        }
+      }
+
+      // 8. Final Validation with Risk Manager (lightweight — pre-check already passed)
       const finalDecision = riskManager.validateDecision(aiDecision, accountStatus, currentMode);
 
       logger.info({ decision: finalDecision.decision }, 'Final trade decision reached');

@@ -6,7 +6,7 @@ import { env } from '../config/env.js';
 import type { AIDecision } from '../types/ai.types.js';
 import { logger } from '../utils/logger.js';
 import { sessionService } from './session.service.js';
-import { TradeResult, TradeAction } from '../types/enum.types.js';
+import { TradeResult, TradeAction, TradeExitReason } from '../types/enum.types.js';
 import { symbolCooldown } from '../core/risk/symbol-cooldown.js';
 
 export class TradeService {
@@ -43,6 +43,10 @@ export class TradeService {
         message: error.message,
         data: error.response?.data 
       }, 'Failed to handle trade decision');
+      
+      // Prevent retry loop if execution fails (e.g. CANNOT AFFORD)
+      logger.warn({ symbol: pair, minutes: 15 }, '[SYMBOL COOLDOWN] Pair blocked after execution failure');
+      symbolCooldown.addCooldown(pair, 15);
     }
   }
 
@@ -74,9 +78,21 @@ export class TradeService {
       if (activeTrades.length === 0) return;
       const activeSymbols = accountStatus.open_positions.map((p: any) => p.symbol);
 
+      logger.debug({ 
+        activeTrades: activeTrades.length, 
+        activeSymbols,
+        pairs: activeTrades.map(t => t.pair)
+      }, 'Sync check: active trades vs positions');
+
       for (const trade of activeTrades) {
         if (!activeSymbols.includes(trade.pair)) {
-          logger.info({ pair: trade.pair }, 'Detected closed position. Syncing results...');
+          logger.info({ 
+            pair: trade.pair, 
+            tradeId: trade._id,
+            entry: trade.entry_price,
+            action: trade.action,
+            createdAt: trade.created_at
+          }, 'Detected closed position. Syncing results...');
 
           if (env.TRADING_MODE === 'PAPER') {
             // PAPER MODE: Simulated result using last known price
@@ -100,7 +116,8 @@ export class TradeService {
             await tradeRepository.update((trade._id as any).toString(), {
               exit_price: exitPrice,
               profit_loss: pnl,
-              result: result
+              result: result,
+              exit_reason: trade.exit_reason || TradeExitReason.MANUAL_OR_UNKNOWN
             });
             logger.info({ pair: trade.pair, result, pnl: `$${pnl.toFixed(4)} (gross: $${grossPnl.toFixed(4)})` }, '📊 PAPER TRADE RESULT RECORDED');
             if (result === TradeResult.LOSS) symbolCooldown.addCooldown(trade.pair);
@@ -110,11 +127,30 @@ export class TradeService {
           const fills = await bitgetClient.getFillHistory(trade.pair, 20);
           let synced = false;
 
+          logger.debug({ 
+            pair: trade.pair, 
+            fillCount: fills?.length || 0,
+            fills: fills?.map((f: any) => ({
+              orderId: f.orderId,
+              tradeSide: f.tradeSide,
+              price: f.price,
+              profit: f.profit
+            }))
+          }, 'Fill history check');
+
           if (fills && fills.length > 0) {
-            const lastFill = fills.find((f: any) => f.tradeSide === 'close');
+            const tradeTime = new Date(trade.created_at).getTime();
+            const lastFill = fills.find((f: any) => f.tradeSide === 'close' && parseInt(f.cTime) >= tradeTime);
             
             if (lastFill) {
               const exitPrice = parseFloat(lastFill.price);
+              
+              logger.info({ 
+                pair: trade.pair, 
+                exitPrice,
+                fillOrderId: lastFill.orderId,
+                fillProfit: lastFill.profit
+              }, 'Found close fill in history');
               
               // EXACT PNL FROM BITGET FILLS
               let exactGrossPnl = 0;
@@ -161,7 +197,8 @@ export class TradeService {
               await tradeRepository.update((trade._id as any).toString(), {
                 exit_price: exitPrice,
                 profit_loss: pnl,
-                result: result
+                result: result,
+                exit_reason: trade.exit_reason || TradeExitReason.MANUAL_OR_UNKNOWN
               });
 
               logger.info({ 
@@ -196,7 +233,8 @@ export class TradeService {
             await tradeRepository.update((trade._id as any).toString(), {
               exit_price: exitPrice,
               profit_loss: pnl,
-              result: result
+              result: result,
+              exit_reason: trade.exit_reason || TradeExitReason.MANUAL_OR_UNKNOWN
             });
             logger.info({ pair: trade.pair, result, pnl: `$${pnl.toFixed(4)} (gross: $${grossPnl.toFixed(4)})`, exit: exitPrice }, '📊 TRADE RESULT RECORDED (FALLBACK)');
             if (result === TradeResult.LOSS) symbolCooldown.addCooldown(trade.pair);

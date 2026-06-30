@@ -72,6 +72,7 @@ export class StrategyGovernor {
         kalman_aggressiveness: response.kalman_aggressiveness,
         max_leverage: response.max_leverage,
         allowed_symbols: response.allowed_symbols,
+        reasoning: response.reasoning || '',
       });
       
       logger.info({ 

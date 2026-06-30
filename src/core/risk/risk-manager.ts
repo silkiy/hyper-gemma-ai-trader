@@ -3,15 +3,26 @@ import { TradeAction, RiskLevel, PositionSize, SessionMode, TradingStrategy } fr
 import { logger } from '../../utils/logger.js';
 import type { AccountStatus } from '../../types/market.types.js';
 import { cooldownManager } from './cooldown-manager.js';
+import { RiskOfRuinCalculator } from './risk-of-ruin.js';
 
 import { env } from '../../config/env.js';
 
 export class RiskManager {
-  private maxDailyLossPercent = -20.0; // Circuit Breaker: -20% (adjusted for micro-account)
+  // ═══════════════════════════════════════════════════════════════
+  // 2% RULE: Maximum risk per trade = 2% of account
+  // Based on professional quant standards (Van Tharp, Ralph Vince)
+  // ═══════════════════════════════════════════════════════════════
+  private readonly MAX_RISK_PER_TRADE_PCT = 0.02; // 2% RULE - NEVER EXCEED
+  private readonly ABSOLUTE_MAX_RISK_PCT = 0.05; // Hard ceiling - system will block above this
+  
+  private maxDailyLossPercent = -Math.abs(env.MAX_DRAWDOWN_PERCENT); // Circuit Breaker dinamis dari .env
   private maxLossStreak = env.MAX_CONSECUTIVE_LOSS; // Configurable from .env
-  private maxRiskPerTradePercent = 100; 
   private maxLeverage = 500; 
   private minConfidenceScore = 40; 
+
+  // Track account health for Risk of Ruin calculation
+  private accountHistory: { equity: number; timestamp: number }[] = [];
+  private tradeHistory: { win: boolean; pnl: number }[] = [];
 
   private getLiqSafetyThreshold(): number {
     return env.TRADING_STRATEGY === TradingStrategy.SCALPING ? 15 : 30;
@@ -19,10 +30,30 @@ export class RiskManager {
 
   validateDecision(decision: AIDecision, account: AccountStatus, currentMode: SessionMode): AIDecision {
     if (decision.final_summary !== 'PRE_SCAN_CHECK') {
-      logger.info('Validating trade decision against risk rules (DYNAMIC LEVERAGE MODE)');
+      logger.info('Validating trade decision against risk rules (2% RULE ENFORCED)');
     }
 
-    // 0. Hardcore Circuit Breaker Check
+    // Track account equity for Risk of Ruin calculation
+    this.trackAccountEquity(account.current_equity);
+
+    // ═══════════════════════════════════════════════════════════════
+    // 0. RISK OF RUIN CHECK - Early warning system
+    // ═══════════════════════════════════════════════════════════════
+    const riskOfRuin = this.calculateRiskOfRuin(account);
+    if (riskOfRuin.riskOfRuin > 0.50) {
+      logger.fatal({ 
+        riskOfRuin: riskOfRuin.riskOfRuinPercent,
+        verdict: riskOfRuin.verdict 
+      }, '🚨 RISK OF RUIN CRITICAL: Account survival at risk');
+      cooldownManager.startCooldown(480, 'Risk of Ruin critical - 8 hour cooldown'); // 8 hours
+      return { 
+        ...decision, 
+        decision: TradeAction.SKIP, 
+        final_summary: `Blocked: Risk of Ruin CRITICAL (${riskOfRuin.riskOfRuinPercent}) - ${riskOfRuin.recommendation}` 
+      };
+    }
+
+    // 0.1 Hardcore Circuit Breaker Check
     if (cooldownManager.isCooldownActive()) {
       const remaining = cooldownManager.getRemainingMinutes().toFixed(1);
       return { 
@@ -34,7 +65,7 @@ export class RiskManager {
 
     if (account.daily_pnl <= this.maxDailyLossPercent) {
       logger.fatal({ pnl: account.daily_pnl }, '🚨 CIRCUIT BREAKER TRIGGERED: Daily loss limit reached.');
-      cooldownManager.startCooldown(240); // 4 hours
+      cooldownManager.startCooldown(240, 'Daily loss limit reached'); // 4 hours
       return { 
         ...decision, 
         decision: TradeAction.SKIP, 
@@ -44,7 +75,7 @@ export class RiskManager {
 
     if (account.loss_streak >= this.maxLossStreak) {
       logger.fatal({ streak: account.loss_streak }, '🚨 CIRCUIT BREAKER TRIGGERED: Consecutive loss streak reached.');
-      cooldownManager.startCooldown(240); // 4 hours
+      cooldownManager.startCooldown(240, 'Consecutive loss streak reached'); // 4 hours
       return { 
         ...decision, 
         decision: TradeAction.SKIP, 
@@ -69,10 +100,9 @@ export class RiskManager {
       };
     }
 
-    // 0.1 Check for existing positions details
+    // 0.2 Check for existing positions details
     for (const pos of activePositions) {
       // RULE: Do not add size to the same coin
-      // If we are checking a real trade decision (not a pre-scan check)
       if (decision.final_summary !== 'PRE_SCAN_CHECK' && pos.symbol === decision.symbol) {
         logger.warn({ symbol: pos.symbol }, 'TRADING BLOCKED: You already have a position in this coin.');
         return { 
@@ -104,9 +134,21 @@ export class RiskManager {
       }
     }
 
-    // 1. Force Leverage Limit (up to 500x)
+    // 2. Force Leverage Limit (up to 500x)
     if (decision.leverage_suggestion > this.maxLeverage) {
       decision.leverage_suggestion = this.maxLeverage;
+    }
+
+    // 3. Apply 2% Rule - Staged Allocation based on confidence
+    const stagedAllocation = this.getStagedAllocation(decision);
+    decision.position_size = this.calculatePositionSizeFromAllocation(stagedAllocation, decision.position_size);
+
+    // 4. Final 2% Rule Enforcement - Hard cap
+    if (stagedAllocation > this.MAX_RISK_PER_TRADE_PCT) {
+      logger.warn({ 
+        requested: `${(stagedAllocation * 100).toFixed(2)}%`,
+        max: `${(this.MAX_RISK_PER_TRADE_PCT * 100).toFixed(0)}%`
+      }, '⚠️ 2% RULE ENFORCED: Risk reduced to maximum allowed');
     }
 
     return decision;
@@ -114,34 +156,62 @@ export class RiskManager {
 
   /**
    * Calculates the allowed allocation percentage based on AI confidence.
+   * ENFORCES 2% RULE: Never exceed 2% risk per trade.
+   * 
    * Formula: max_risk = (100% / MAX_CONSECUTIVE_LOSS) / 2
-   * HIGH: 100% of max_risk
+   * HIGH: 100% of max_risk (capped at 2%)
    * MEDIUM: 60% of max_risk
    * LOW: 20% of max_risk
-   * env.MAX_TRADE_ALLOCATION is the absolute hard cap.
    */
   getStagedAllocation(decision: AIDecision): number {
     const maxConsecutiveLoss = env.MAX_CONSECUTIVE_LOSS || 10;
-    const maxRiskBase = (1.0 / maxConsecutiveLoss) / 2; // e.g., (1.0 / 10) / 2 = 0.05 (5%)
+    
+    // Base risk calculation - conservative approach
+    // With MAX_CONSECUTIVE_LOSS=10: base = 5%
+    // But we cap at 2% MAX_RISK_PER_TRADE_PCT
+    const maxRiskBase = Math.min(
+      (1.0 / maxConsecutiveLoss) / 2,
+      this.MAX_RISK_PER_TRADE_PCT // ENFORCE 2% RULE
+    );
 
     // Fallback if confidence is missing
     if (!decision.confidence) {
-      return env.MAX_TRADE_ALLOCATION;
+      return Math.min(maxRiskBase * 0.5, this.MAX_RISK_PER_TRADE_PCT); // Conservative default
     }
 
-    let multiplier = 0.2; // LOW
-    if (decision.confidence === 'HIGH') multiplier = 1.0;
-    else if (decision.confidence === 'MEDIUM') multiplier = 0.6;
+    let multiplier = 0.2; // LOW confidence: 20% of base
+    if (decision.confidence === 'HIGH') multiplier = 1.0;      // HIGH: 100% of base
+    else if (decision.confidence === 'MEDIUM') multiplier = 0.6; // MEDIUM: 60% of base
 
     const calculatedAllocation = maxRiskBase * multiplier;
 
-    // Return minimum of calculated or hard cap
-    return Math.min(calculatedAllocation, env.MAX_TRADE_ALLOCATION);
+    // FINAL ENFORCEMENT: Never exceed 2% rule
+    const finalAllocation = Math.min(calculatedAllocation, this.MAX_RISK_PER_TRADE_PCT);
+    
+    if (finalAllocation > this.MAX_RISK_PER_TRADE_PCT) {
+      logger.warn({ 
+        requested: finalAllocation,
+        capped: this.MAX_RISK_PER_TRADE_PCT
+      }, '2% RULE: Allocation capped at maximum');
+    }
+
+    return finalAllocation;
+  }
+
+  /**
+   * Calculates position size from staged allocation percentage.
+   * Maps allocation to PositionSize enum for compatibility.
+   */
+  calculatePositionSizeFromAllocation(allocation: number, currentPositionSize: PositionSize): PositionSize {
+    // Map allocation percentage to PositionSize enum
+    if (allocation >= 0.20) return PositionSize.NORMAL;
+    if (allocation >= 0.10) return PositionSize.REDUCED;
+    return PositionSize.SMALL;
   }
 
   calculatePositionSize(equity: number, positionSize: PositionSize): number {
-    // Leave 80% of equity as buffer for fees and unrealized PnL
-    const safeMargin = equity * (this.maxRiskPerTradePercent / 100);
+    // ENFORCE 2% RULE: Maximum risk per trade
+    const safeMargin = equity * this.MAX_RISK_PER_TRADE_PCT;
     
     switch (positionSize) {
       case PositionSize.NORMAL:
@@ -153,6 +223,129 @@ export class RiskManager {
       default:
         return safeMargin;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // RISK OF RUIN TRACKING & CALCULATION
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Track account equity over time for Risk of Ruin calculation
+   */
+  private trackAccountEquity(equity: number): void {
+    this.accountHistory.push({
+      equity,
+      timestamp: Date.now()
+    });
+
+    // Keep last 1000 data points
+    if (this.accountHistory.length > 1000) {
+      this.accountHistory = this.accountHistory.slice(-1000);
+    }
+  }
+
+  /**
+   * Record trade result for Risk of Ruin calculation
+   */
+  recordTradeResult(win: boolean, pnl: number): void {
+    this.tradeHistory.push({ win, pnl });
+    
+    // Keep last 100 trades
+    if (this.tradeHistory.length > 100) {
+      this.tradeHistory = this.tradeHistory.slice(-100);
+    }
+  }
+
+  /**
+   * Calculate Risk of Ruin based on current account state
+   */
+  calculateRiskOfRuin(account: AccountStatus) {
+    // Use trade history if available, otherwise use defaults
+    const recentTrades = this.tradeHistory.slice(-50);
+    
+    let winRate = 0.50; // Default 50%
+    let avgWin = 1.5;   // Default 1.5%
+    let avgLoss = 1.0;  // Default 1.0%
+
+    if (recentTrades.length >= 10) {
+      const wins = recentTrades.filter(t => t.win);
+      const losses = recentTrades.filter(t => !t.win);
+      
+      winRate = wins.length / recentTrades.length;
+      avgWin = wins.length > 0 
+        ? wins.reduce((sum, t) => sum + Math.abs(t.pnl), 0) / wins.length / account.current_equity * 100
+        : 1.5;
+      avgLoss = losses.length > 0
+        ? losses.reduce((sum, t) => sum + Math.abs(t.pnl), 0) / losses.length / account.current_equity * 100
+        : 1.0;
+    }
+
+    return RiskOfRuinCalculator.calculate({
+      winRate,
+      avgWin,
+      avgLoss,
+      riskPerTrade: this.MAX_RISK_PER_TRADE_PCT, // Use 2% rule
+    });
+  }
+
+  /**
+   * Get Risk of Ruin report for monitoring
+   */
+  getRiskOfRuinReport(account: AccountStatus): string {
+    const ror = this.calculateRiskOfRuin(account);
+    
+    // Calculate win rate from trade history
+    const recentTrades = this.tradeHistory.slice(-50);
+    const winRate = recentTrades.length > 0 
+      ? recentTrades.filter(t => t.win).length / recentTrades.length 
+      : 0.50;
+    
+    const expectedStreak = RiskOfRuinCalculator.expectedLosingStreak(winRate);
+    const maxStreak = RiskOfRuinCalculator.maxExpectedLosingStreak(winRate);
+
+    return [
+      `📊 RISK OF RUIN REPORT`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `Risk of Ruin: ${ror.riskOfRuinPercent}`,
+      `Verdict: ${ror.verdict}`,
+      `Edge: ${(ror.edge * 100).toFixed(2)}%`,
+      `Expectancy: ${(ror.expectancy * 100).toFixed(2)}% per trade`,
+      `Kelly Optimal: ${(ror.kellyPercent * 100).toFixed(2)}%`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `Win Rate: ${(winRate * 100).toFixed(1)}%`,
+      `Expected Losing Streak: ${expectedStreak.toFixed(0)} trades`,
+      `Max Expected Streak (95%): ${maxStreak} trades`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `💡 ${ror.recommendation}`,
+    ].join('\n');
+  }
+
+  /**
+   * Validate if position size respects 2% rule
+   */
+  validatePositionSize(notional: number, equity: number, leverage: number): { valid: boolean; maxAllowed: number; reason?: string } {
+    const marginUsed = notional / leverage;
+    const riskPercent = marginUsed / equity;
+
+    if (riskPercent > this.ABSOLUTE_MAX_RISK_PCT) {
+      return {
+        valid: false,
+        maxAllowed: equity * this.ABSOLUTE_MAX_RISK_PCT * leverage,
+        reason: `Position size ${(riskPercent * 100).toFixed(2)}% exceeds absolute max ${(this.ABSOLUTE_MAX_RISK_PCT * 100).toFixed(0)}%`
+      };
+    }
+
+    if (riskPercent > this.MAX_RISK_PER_TRADE_PCT) {
+      logger.warn({
+        risk: `${(riskPercent * 100).toFixed(2)}%`,
+        max: `${(this.MAX_RISK_PER_TRADE_PCT * 100).toFixed(0)}%`
+      }, '⚠️ Position exceeds 2% rule - consider reducing');
+    }
+
+    return {
+      valid: true,
+      maxAllowed: equity * this.MAX_RISK_PER_TRADE_PCT * leverage,
+    };
   }
 }
 

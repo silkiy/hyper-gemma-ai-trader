@@ -1,7 +1,7 @@
 # 🤖 Hyper-Gemma AI Trader
 
-> **Production-ready Autonomous AI Trading System**
-> Menggunakan Bitget Futures, Ollama, Gemma 4, MongoDB, Node.js, dan TypeScript
+> **Production-ready Autonomous Quantitative Trading System (Trinity v2)**
+> Menggunakan Bitget Futures, Pure Math Quant Engine (Hurst/Z-Score), MongoDB, Node.js, dan TypeScript. AI (Gemma 4) kini menjadi opsional untuk eksekusi ultra-cepat.
 
 [![Version](https://img.shields.io/badge/version-3.0.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#)
@@ -47,31 +47,30 @@
 
 ## 📖 Deskripsi Project
 
-**Hyper-Gemma AI Trader** adalah sistem trading cryptocurrency **otonom sepenuhnya** (fully autonomous) yang menggabungkan kecerdasan buatan **Gemma 4** (via Ollama) dengan **Quantitative Mathematics Engine** untuk trading futures di **Bitget Exchange** secara real-time.
+**Hyper-Gemma AI Trader** (kini berevolusi menjadi **Trinity v2 Quant Engine**) adalah sistem trading cryptocurrency **otonom sepenuhnya** (fully autonomous) yang difokuskan pada kedisiplinan **Quantitative Mathematics Engine** untuk trading futures di **Bitget Exchange** secara real-time.
 
-Sistem ini menggunakan arsitektur **Hybrid Tactical** — menggabungkan kecepatan kalkulasi matematika murni (**Quant Trinity**: Z-Score + Hurst Exponent + VWAP + Kalman Filter) dengan kecerdasan AI untuk konfirmasi keputusan. **QuantEngine** mendeteksi peluang dalam milidetik menggunakan regime-aware logic (Trend Following vs Mean Reversion), lalu **Gemma AI** memvalidasi sebelum eksekusi.
+Sistem ini menggunakan arsitektur **Pure Quant Tactical** — mengutamakan kecepatan kalkulasi matematika murni (**Quant Trinity**: Z-Score + Hurst Exponent + VWAP + Kalman Filter) sebagai pengambil keputusan absolut. Kecerdasan AI (Gemma) disetel pada mode pasif (`MOCK_AI=true`) untuk mencegah keragu-raguan dan mematikan emosi/halusinasi LLM, sehingga bot 100% patuh pada matematika probabilitas.
 
 ### 🎯 Filosofi Inti
 
 | Prinsip | Penjelasan |
 |---------|------------|
-| **Hybrid Intelligence** | Matematika untuk kecepatan, AI untuk kebijaksanaan |
-| **Capital Multiplication** | Agresif mencari pertumbuhan modal melalui leverage optimal |
-| **Self-Learning** | Sistem belajar dari kesalahan trading sebelumnya |
-| **Risk Override** | Risk Manager dapat meng-override keputusan AI |
-| **No Emotion** | AI tidak terpengaruh emosi — tidak FOMO, tidak revenge trade |
-| **Battle Directive** | Gemma sebagai "Gubernur Strategi" menentukan arah makro setiap jam |
+| **Pure Math Discipline** | 100% didorong oleh angka, tanpa intervensi bias LLM (MOCK_AI=true) |
+| **Capital Multiplication** | Agresif mencari pertumbuhan modal melalui leverage optimal & Moon Bag TP |
+| **Risk Over Everything** | Hard blocker untuk Trailing Stop dan Liquidation Guard |
+| **No Emotion** | Tidak FOMO, tidak revenge trade (15-min cooldown) |
+| **Regime-Aware** | Otomatis menyesuaikan gaya (Trend vs Mean Reversion) |
 
 ---
 
 ## 🏗️ Arsitektur Sistem
 
-Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur eksekusi:
+Sistem ini menggunakan **Pure Quant Tactical Architecture** dengan tiga jalur eksekusi:
 
 ```
 ┌───────────────────────────────────────────────────────┐
 │                  SERVER (Entry Point)                 │
-│    Hybrid Tactical Engine + Quant Trinity Router      │
+│    Pure Quant Engine + Trinity v2 Router              │
 ├─────────────┬──────────┬──────────┬───────────────────┤
 │     API     │   CORE   │ EXCHANGE │     SERVICES      │
 │  (Fastify)  │(AI/Quant)│ (Bitget) │ (Trade Orchestr.) │
@@ -86,16 +85,16 @@ Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur ekseku
 
 ### Arsitektur Detail:
 
-- **Hybrid Tactical Architecture** — Menggabungkan 3 jalur: Strategy Governor (Cold Path), QuantEngine (Hot Path), dan Gemma AI (Confirmation Path)
-- **Battle Directive System** — Gemma mengeluarkan "perintah perang" makro setiap jam yang menentukan bias, threshold, dan agresivitas
-- **Quant Trinity Engine** — Mesin matematika murni untuk deteksi peluang dalam milidetik (Z-Score + Hurst Exponent + VWAP)
+- **Pure Quant Tactical Architecture** — Bot dijalankan dalam `MOCK_AI=true` (Pure Quant Mode), di mana QuantEngine adalah pengambil keputusan mutlak tanpa intervensi LLM
+- **Battle Directive System** — Saat `MOCK_AI=true`, Gemma **tidak dipanggil**. Parameter (bias=NEUTRAL, z_score_threshold, kalman_aggressiveness) menggunakan nilai default optimal yang sudah di-hardcode
+- **Quant Trinity v2 Engine** — Mesin matematika murni untuk deteksi peluang (Z-Score + Hurst Exponent + VWAP + Kalman Filter + RSI + Volume + EMA)
 - **Regime-Aware Execution** — Otomatis memilih strategi: Trend Following (Hurst ≥ threshold) atau Mean Reversion (Hurst < threshold)
-- **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING)
-- **Scan Mode System** — 3 mode pemindaian: VIP (major pairs), HOT50 (top volume), ALL (seluruh market)
+- **Strategy-Driven** — Mendukung multiple trading strategy (SCALPING, INTRADAY, SWING) dengan parameter persentase dinamis
+- **Scan Mode System** — Multiple mode pemindaian: VIP (17 major pairs), HOT{N} (top volume), ALL (seluruh market)
 - **PAPER Mode Isolation** — Mode simulasi terisolasi: posisi mock dihitung dari session trades, bukan posisi exchange riil
-- **AI Feedback Loop** — Hasil trading sebelumnya diinjeksikan ke prompt AI
+- **Percent-Based Risk** — Semua SL/TP dan batas kerugian menggunakan persentase (bukan USD statis) agar universal untuk semua ukuran modal
 - **Self-Learning Memory** — MongoDB menyimpan pelajaran dari kesalahan
-- **Risk First Trading System** — Risk Manager sebagai penjaga terakhir sebelum eksekusi
+- **Risk First Trading System** — Risk Manager + Liquidation Guard + 40% Block Rule sebagai penjaga terakhir
 
 ---
 
@@ -105,7 +104,7 @@ Sistem ini menggunakan **Hybrid Tactical Architecture** dengan tiga jalur ekseku
 |----------|-----------|
 | **Runtime** | Node.js + TypeScript 6.0 |
 | **Web Server** | Fastify 5 |
-| **AI Engine** | Ollama + Gemma 4 (gemma4:latest) |
+| **AI Engine** | Ollama + Gemma 4 (opsional, `MOCK_AI=true` untuk Pure Quant Mode) |
 | **Database** | MongoDB Atlas + Mongoose 9 |
 | **Exchange** | Bitget Futures API V2 (USDT-FUTURES) |
 | **Quant** | simple-statistics + mathjs |
@@ -143,7 +142,10 @@ hyper-gemma-ai-trader/
 │   │   │   └── market-regime.ts     # Deteksi regime market (Trending/Ranging/Volatile)
 │   │   └── risk/
 │   │       ├── risk-manager.ts      # Validasi risiko, leverage cap & staged allocation
-│   │       └── cooldown-manager.ts  # Sistem cooldown setelah loss
+│   │       ├── cooldown-manager.ts  # Sistem cooldown setelah loss
+│   │       ├── symbol-cooldown.ts   # Cooldown per-simbol (15 menit setelah gagal eksekusi)
+│   │       ├── adaptive-sizer.ts    # Adaptive position sizing
+│   │       └── risk-of-ruin.ts      # Kalkulasi Risk of Ruin
 │   ├── exchange/
 │   │   ├── bitget.client.ts         # Client API Bitget V2 (HMAC-SHA256 signature)
 │   │   ├── market-data.provider.ts  # Provider data market real-time (Bitget)
@@ -154,12 +156,15 @@ hyper-gemma-ai-trader/
 │   │   │   ├── trade.model.ts       # Schema trade + lifecycle (entry, exit, PnL, result)
 │   │   │   ├── memory.model.ts      # Schema memory/pelajaran
 │   │   │   ├── session.model.ts     # Schema sesi trading
-│   │   │   └── directive.model.ts   # Schema Battle Directive (Mongoose)
+│   │   │   ├── directive.model.ts   # Schema Battle Directive (Mongoose)
+│   │   │   ├── pulse-log.model.ts   # Schema pulse log (Z-Score, Hurst, Regime per scan)
+│   │   │   └── cooldown.model.ts    # Schema cooldown per-simbol
 │   │   └── repositories/
 │   │       ├── trade.repository.ts  # Repository trade (CRUD + open/close + pair analytics)
 │   │       ├── memory.repository.ts # Repository akses data memory
 │   │       ├── session.repository.ts # Repository akses data session
-│   │       └── directive.repository.ts # Repository akses Battle Directive
+│   │       ├── directive.repository.ts # Repository akses Battle Directive
+│   │       └── pulse-log.repository.ts # Repository pulse log per scan cycle
 │   ├── services/
 │   │   ├── trade.service.ts         # Orchestrator eksekusi trade
 │   │   └── session.service.ts       # Manajemen sesi trading (lifecycle)
@@ -192,10 +197,11 @@ hyper-gemma-ai-trader/
 │       └── memory-consolidation.job.ts # Job konsolidasi memori harian
 ├── etc/                             # Dokumentasi & hasil testing
 │   ├── ai-promt.json                # Konfigurasi prompt AI & rencana pengembangan
+│   ├── financial_projection.md      # Proyeksi finansial & target profit
 │   ├── BACKTEST_RESULTS.md          # Hasil backtesting
 │   ├── SIMULATION_RESULTS.md        # Hasil simulasi
 │   ├── FINAL_VERIFICATION.md        # Verifikasi final sistem
-│   └── GEMINI.md                    # Catatan AI assistant
+│   └── system_audit_report.md       # Laporan audit sistem
 ├── images/                          # Screenshot hasil trading riil
 ├── .env                             # Environment variables (tidak di-commit)
 ├── .env.example                     # Template environment variables
@@ -214,10 +220,15 @@ hyper-gemma-ai-trader/
 
 **File:** `src/core/ai/strategy-governor.ts`
 
-Gemma bertindak sebagai **"Gubernur Strategi"** yang mengeluarkan **Battle Directive** setiap jam. Directive ini menentukan arah makro untuk seluruh sistem:
+Saat `MOCK_AI=true` (Pure Quant Mode), Gemma **tidak dipanggil**. Strategy Governor langsung menulis nilai default ke MongoDB:
 
-- **Macro Market Analysis** — Menganalisis BTC dan ETH sebagai barometer pasar
-- **Battle Directive Output** — Menghasilkan JSON terstruktur berisi:
+- **bias:** `NEUTRAL` (tidak memihak arah — biarkan QuantEngine yang menentukan)
+- **z_score_threshold:** `1.5` (SCALPING) atau `2.0` (INTRADAY/SWING)
+- **kalman_aggressiveness:** `0.1`
+- **max_leverage:** `50` (akan dicap oleh executor sesuai batas exchange)
+- **allowed_symbols:** `[]` (semua simbol diizinkan)
+
+Saat `MOCK_AI=false` (AI Mode), Gemma bertindak sebagai **"Gubernur Strategi"** yang menganalisis BTC & ETH sebagai barometer pasar dan mengeluarkan **Battle Directive** setiap jam:
   - `bias` — Arah pasar: `LONG`, `SHORT`, atau `NEUTRAL`
   - `z_score_threshold` — Threshold sensitivitas untuk QuantEngine (1.0-5.0)
   - `kalman_aggressiveness` — Agresivitas Kalman Filter (0.01-0.5)
@@ -239,14 +250,17 @@ Mesin trading matematika murni yang bekerja dalam **milidetik** tanpa memanggil 
 - **OHLCV Data Pipeline** — Mengambil data candlestick lengkap (Open, High, Low, Close, Volume) via `getOHLCVHistory()` dari Bitget
 - **Dual Window Analysis** — Menggunakan 2 jendela data:
   - **Short Window (20 candles)** → Untuk Z-Score (anomali jangka pendek)
-  - **Long Window (100 candles)** → Untuk Hurst Exponent (deteksi regime)
+  - **Long Window (50-100 candles)** → Untuk Hurst Exponent (SCALPING: 50, INTRADAY/SWING: 100)
 - **Regime-Aware Execution Logic** — Otomatis memilih strategi berdasarkan Hurst Exponent:
-  - **MODE A: Trend Following** (Hurst ≥ threshold) → Entry pada Kalman Bullish + Price above VWAP (momentum sehat)
-  - **MODE B: Mean Reversion** (Hurst < threshold) → Entry pada Z-Score extreme + Micro-Bounce + Value area (dekat/di bawah VWAP)
+  - **MODE A: Trend Following** (Hurst ≥ threshold) → Macro Alignment + Kalman Bullish + 2/6 Confirmation (termasuk Order Flow Imbalance)
+  - **MODE B: Mean Reversion** (Hurst < threshold) → Z-Score extreme + RSI extreme + Bounce + Macro Alignment + Volume Profile Area (VAL/VAH) + `!isSharpDrop` (Hard Blocker)
+- **6 Konfirmasi (Need 2 of 6):** VWAP Dev, RSI 14, Volume Spike, Candle Momentum, Multi-scale Hurst, Order Flow Imbalance (VSA)
+- **Gatekeeper & Support Filters:** ATR > batas fee, Macro Alignment (EMA 20 & VWAP Macro), Momentum Threshold (tolak pisau jatuh/pump > 1.2%), Volume Profile Area (VAL untuk LONG, VAH untuk SHORT)
+- **Order Flow Absorption Guard:** Saklar pengaman akhir yang membatalkan entry jika terdeteksi absorpsi berlawanan arah (bearish absorption saat LONG / bullish absorption saat SHORT) dan mendongkrak tingkat keyakinan (HIGH confidence / +15% confidence score) jika absorption searah.
 - **VWAP Confirmation** — Daily VWAP (reset 00:00 UTC) sebagai value/premium area detector
 - **Kalman Trend Filter** — Anti-noise: **Adaptive Gain** Kalman Filter yang menyesuaikan noise berdasarkan volatilitas lokal, dikontrol oleh `kalman_aggressiveness` dari Directive
 - **Directive-Driven** — Menggunakan `z_score_threshold`, `bias`, dan `kalman_aggressiveness` dari Battle Directive
-- **Strategy-Adaptive Hurst Threshold** — SCALPING: `>= 0.50`, INTRADAY/SWING: `>= 0.60` (inclusive `>=` — konsisten di QuantEngine, DecisionEngine, dan Server)
+- **Strategy-Adaptive Hurst Threshold** — SCALPING: `>= 0.55`, INTRADAY: `>= 0.60`, SWING: `>= 0.65` (inclusive `>=`)
 - **NEUTRAL Safety** — Jika bias NEUTRAL, menggunakan threshold ketat 2.2 untuk kedua arah
 - **Instant Decision** — Menghasilkan `AIDecision` lengkap (confidence, leverage, regime, hurst, vwap deviation) tanpa latency AI
 
@@ -491,10 +505,12 @@ Mengeksekusi order ke Bitget dengan proteksi otomatis dan optimisasi leverage:
 - **Precision Handling** — Menggunakan `Math.ceil` untuk memastikan kuantitas selalu ≥ minimum
 - **Execution Price Retries** — Melakukan hingga 3 kali percobaan untuk fetch execution price dari fill history
 - **ATR-Based Dynamic SL/TP** — Menyesuaikan Take Profit dan Stop Loss menggunakan ATR jika tersedia:
-  - `SL = 1.5x ATR` (capped max 5%)
-  - `TP = 2.5x ATR` (capped max 15%)
-  - Fallback ke persentase statis (atau USD max loss untuk Scalping) jika ATR tidak tersedia
+  - `SL = 1.5x ATR` (Floor minimum: 1.0%)
+  - `TP = 25% Moon Bag` (Membiarkan bursa menutup jauh di atas, agar Trailing Stop di server yang mengatur exit)
+  - Fallback ke persentase statis dari `.env` (SCALP/INTRADAY/SWING `_MAX_LOSS_PERCENT` dan `_PROFIT_TARGET_PERCENT`) jika ATR tidak tersedia
   - Menambahkan *Slippage Buffer* 0.01% untuk eksekusi yang lebih aman
+- **Liquidation Guard** — Menolak trade jika SL terlalu dekat dengan harga likuidasi (mencegah margin call)
+- **Limit Order First** — Mencoba limit order (fee 0.02%) sebelum fallback ke market order (fee 0.1%)
 - **Atomic SL/TP (Preset)** — SL/TP dikirim **dalam request yang sama** dengan market order (bukan Plan Order terpisah):
   - `presetStopLossPrice` + `presetTakeProfitPrice` dimasukkan ke body `place-order`
   - **Benefit:** SL/TP dijamin terpasang, tidak ada race condition atau partial fill
@@ -602,17 +618,17 @@ Orkestrator yang menghubungkan keputusan AI dengan eksekusi order:
 
 ---
 
-### 15. ♾️ Hybrid Tactical Engine & Background Jobs
+### 15. ♾️ Pure Quant Engine & Background Jobs
 
-**Arsitektur hybrid:** Menggabungkan 3 jalur eksekusi secara paralel.
+**Arsitektur Pure Quant:** Menggabungkan 3 jalur eksekusi secara paralel.
 
 | Komponen | Tipe | Jadwal | Deskripsi |
 |----------|------|--------|-----------|
-| **Strategy Governor** | Cron `0 * * * *` | Setiap 1 jam | Gemma mengeluarkan Battle Directive baru |
-| **Hybrid Tactical Loop** | `while(true)` | Terus-menerus | Trinity scan (Z+Hurst+VWAP) → Gemma confirm → Execute |
+| **Strategy Governor** | Cron `0 * * * *` | Setiap 1 jam | Menulis Battle Directive (hardcoded defaults saat `MOCK_AI=true`, Gemma saat `MOCK_AI=false`) |
+| **Pure Quant Loop** | `while(true)` | Terus-menerus | Trinity v2 scan → Gatekeeper → 2/5 Confirm → Execute (Atomic SL/TP) |
 | **Memory Consolidation** | Cron `0 0 * * *` | Setiap tengah malam | Konsolidasi pelajaran harian |
 
-**Hybrid Tactical Loop:**
+**Pure Quant Loop:**
 ```
 runHybridTradingLoop(mode) {
   1. Strategy Governor: Refresh Battle Directive (initial)
@@ -623,10 +639,13 @@ runHybridTradingLoop(mode) {
         - Jika posisi hilang → fetch fill history → record PnL, exit_price, result, fees
         - Log: [TRADE CLOSED] BTCUSDT LONG → TP_HIT | PnL: +0.52 USDT
      3. Capital Shield & Tactical Exits:
-        - BACKUP SHIELD: Exit force loss jika PnL exceed 2x threshold (Bitget SL gagal)
-        - TIME/PROFIT EXIT: Max Hold / Profit hit / Trailing Stop / Smart Breakeven
-     4. Cek Account & Risk Status
-        - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 10s → Retry
+         - BACKUP SHIELD: Exit force loss jika PnL exceed 1.3x threshold (Bitget SL gagal)
+         - THE 40% BLOCK: Trailing Stop DILARANG aktif jika profit < 40% dari Max Loss
+         - DYNAMIC TRAILING: 25%/35%/45% dari puncak (berdasarkan level profit)
+         - TIME EXIT: Max Hold Minutes → force close
+         - PROFIT TIME EXIT: Setelah X menit, jika profit > fee buffer → secure
+      4. Cek Account & Risk Status
+         - Jika Safety Block ATAU Max Positions → Portfolio Snapshot → Wait 1.5s → Retry
      5. Determine Pairs to Scan:
         - SINGLE MODE: Hanya `FOCUS_PAIR`
         - MULTI MODE: Fetch tickers → Filter RWA blacklist → Apply SCAN_MODE
@@ -644,8 +663,10 @@ runHybridTradingLoop(mode) {
           - MODE B (Ranging, H < threshold): Z-Score extreme + Bounce + VWAP value area → Hit!
           - Return trioDirection (Kalman direction) untuk sinkronisasi guard
        b. 🛡️ VOLUME GATE & MOMENTUM GUARD:
-          - Skip jika volume 24h < $100k
-          - Block trade jika melawan momentum ekstrem (> ±5% 24h)
+           - Skip jika volume 24h < $1M (Scalping) / $5M (Intraday)
+           - Block LONG jika coin sudah pump > 10% (buy-at-top risk)
+           - Block SHORT jika coin sudah crash > 10% (sell-at-bottom risk)
+           - Block semua jika change > ±20% (parabolic/crash)
        c. 🤖 AI SNIPER (Gemma confirms, dengan mathDir & isAlpha):
            - Kirim ke Decision Engine + mathDir → Gemma validasi
            - GEMMA_FLIP_BLOCKED guard menggunakan mathDir dari step (a)
@@ -674,17 +695,21 @@ runHybridTradingLoop(mode) {
 
 **Engine Features:**
 - **Real-time Trinity Pulse** — Visual tracking Z-Score + Hurst + Regime setiap pair di terminal (`\r` overwrite)
-- **Trinity-First, AI-Second** — QuantEngine Trinity (milidetik) → Gemma AI (detik) hanya jika Trinity signal aktif
-- **Capital Shield** — Dollar-Loss Exit backup ($ Max Loss) jika Bitget SL gagal (triggers at 2x threshold)
-- **Tactical Exits** — Manajemen penutupan posisi pintar (Time limit, Profit target, Trailing Stop, Smart Breakeven)
-- **Volume Gate & Momentum Guard** — Filter koin illiquid (< $100k 24h volume) dan blokir entry melawan momentum ekstrem (> ±5% 24h)
+- **Pure Quant Execution** — `MOCK_AI=true`: QuantEngine langsung mengeksekusi sinyal tanpa menunggu AI/LLM
+- **Capital Shield (Backup)** — Percent-Loss Exit backup jika Bitget SL gagal (triggers at 1.3x maxLossDollarLimit)
+- **The 40% Block Rule** — Trailing Stop DILARANG aktif sebelum profit mencapai 40% dari batas Cut Loss (mencegah profit recehan merusak R:R)
+- **Dynamic Trailing Stop** — 3 level: 25% (default), 35% (target tercapai), 45% (Moon Bag 2x target)
+- **Volume Gate** — Filter koin illiquid: $1M (Scalping), $5M (Intraday), $500K (Swing)
+- **Momentum Guard** — Block LONG jika pump > 10%, Block SHORT jika crash > 10%, Block semua jika > ±20%
 - **Alpha Detection** — Mendeteksi koin dengan independen momentum (Hurst > 0.70)
-- **Smart Safety Block** — Block untuk `Blocked: Safety` DAN `Blocked: Max positions`, wait 10s
+- **Smart Safety Block** — Block untuk `Blocked: Safety` DAN `Blocked: Max positions`, wait 1.5s
 - **Auto-Close Detection** — Setiap cycle, cek open trades vs live positions → auto-record PnL, result, exit_reason via fill history
 - **RWA Blacklist** — Otomatis filter saham/komoditas (isRwa) dari scan, hanya crypto murni yang di-scan
+- **Execution Failure Cooldown** — Jika eksekusi gagal (misal CANNOT AFFORD), koin diblokir 15 menit (anti-spam)
+- **Pending Order Cleanup** — Cancel stale orders > 15 menit secara otomatis
 - **Single Pair Mode** — `TRADING_MODE_PAIR=SINGLE` + `FOCUS_PAIR` untuk fokus satu koin saja
 - **Tactical Strike/Veto** — Logging eksplisit untuk setiap keputusan (konfirmasi atau tolak)
-- **API-Friendly** — Micro-delay 250ms antar pair, 10s antar cycle
+- **API-Friendly** — Micro-delay 250ms antar pair, 1.5s antar cycle saat posisi terbuka
 
 ---
 
@@ -799,8 +824,8 @@ Client untuk Ollama API yang mendukung dua mode generasi:
 ### Prerequisites
 - **Node.js** LTS
 - **MongoDB** (Atlas atau lokal)
-- **Ollama** terinstal dan running (`ollama serve`)
-- **Model Gemma 4** terinstal di Ollama (`ollama pull gemma4:latest`)
+- **Ollama** terinstal dan running (`ollama serve`) — *hanya diperlukan jika `MOCK_AI=false`*
+- **Model Gemma 4** terinstal di Ollama (`ollama pull gemma4:latest`) — *hanya diperlukan jika `MOCK_AI=false`*
 - **Bitget Account** dengan API Key, Secret Key, dan Passphrase
 
 ### Setup
@@ -845,23 +870,23 @@ npm run dev
 | `MIN_TPSL_NOTIONAL` | Minimum notional agar SL/TP bisa terpasang (USDT) | `10` |
 | `TRADING_STRATEGY` | Strategi trading: `SCALPING` / `INTRADAY` / `SWING` | `INTRADAY` |
 | `SCAN_MODE` | Mode pemindaian market: `VIP` / `TOP20` / `HOT5` / `HOT20` / `HOT40` / `HOT60` / `HOT80` / `HOT100` / `ALL` | `VIP` |
-| `TRADING_MODE_PAIR` | Mode pair: `SINGLE` (satu koin) atau `MULTI` (scan banyak) | `MULTI` |
-| `FOCUS_PAIR` | Koin fokus saat `TRADING_MODE_PAIR=SINGLE` (e.g. `BTCUSDT`) | — (wajib jika SINGLE) |
+| `MAX_DRAWDOWN_PERCENT` | Batas maksimum drawdown harian (%) sebelum Circuit Breaker aktif | `20` |
 | `SCALP_MAX_HOLD_MINUTES` | Durasi hold maksimal (menit) untuk Scalping | `10` |
-| `SCALP_PROFIT_EXIT_MINUTES` | Waktu exit profit (menit) untuk Scalping | `5` |
-| `SCALP_PROFIT_EXIT_USD` | Target profit (USD) untuk Scalping | `0.05` |
-| `SCALP_MAX_LOSS_USD` | Batas loss (USD) untuk Scalping | `0.03` |
+| `SCALP_PROFIT_TARGET_PERCENT` | Target profit (%) untuk Scalping | `0.5` |
+| `SCALP_MAX_LOSS_PERCENT` | Batas loss mutlak (%) untuk Scalping | `0.3` |
+| `INTRADAY_PROFIT_TARGET_PERCENT` | Target profit (%) untuk Intraday | `1.5` |
+| `INTRADAY_MAX_LOSS_PERCENT` | Batas loss mutlak (%) untuk Intraday | `0.5` |
 
 ---
 
 ## 🔮 Roadmap & Scalability
 
 ### ✅ Sudah Diimplementasi
-- [x] **Hybrid Tactical Architecture** (Quant Trinity + Gemma AI Confirmation)
-- [x] **Strategy Governor / Battle Directive System** (Gemma sebagai Commander setiap jam)
+- [x] **Pure Quant Tactical Architecture** (Quant Trinity v2 Engine)
+- [x] **Strategy Governor / Battle Directive System** (Menggunakan default dinamis saat MOCK_AI=true)
 - [x] **Quant Trinity Engine** (Z-Score + Hurst Exponent + VWAP + Kalman Filter)
 - [x] **Regime-Aware Execution** (Trend Following vs Mean Reversion berdasarkan Hurst)
-- [x] **Dual Window Analysis** (Short 20 candles + Long 100 candles)
+- [x] **Dual Window Analysis** (Short 20 candles + Long 50-100 candles)
 - [x] **OHLCV Data Pipeline** (Full candlestick data dari Bitget)
 - [x] **Bitget Futures API V2** (HMAC-SHA256, market orders, atomic SL/TP)
 - [x] **PAPER Mode Position Isolation** (mock positions dari session trades, bukan exchange riil)
@@ -878,17 +903,19 @@ npm run dev
 - [x] **trioDirection Passthrough** (QuantEngine → server.ts → DecisionEngine — single source of truth)
 - [x] **VWAP Value/Premium Area Detection** (daily reset 00:00 UTC)
 - [x] **Trade Lifecycle Tracking** (auto-detect closed positions via Bitget fill history → record exit_price, realized_pnl, result, fees)
-- [x] **Single Pair Mode** (`TRADING_MODE_PAIR=SINGLE` + `FOCUS_PAIR` untuk fokus satu koin)
 - [x] **RWA Blacklist** (otomatis filter saham/komoditas dari scan menggunakan `getExchangeInfo().isRwa`)
 - [x] **Pair Performance Analytics** (aggregatePairPerformance: win rate, avg PnL, PnL ratio, composite score per pair)
-- [x] **Capital Shield** (Dollar-Loss Exit backup fallback berdasarkan `SCALP_MAX_LOSS_USD`)
-- [x] **Tactical Exits** (Smart Breakeven, Trailing Stop, Time & Profit Exits)
-- [x] **ATR-Based Dynamic SL/TP** (1.5x ATR SL, 2.5x ATR TP dengan slippage buffer 0.01%)
-- [x] **Volume Gate & Momentum Guard** (Filter volume < $100k, block melawan trend ekstrem ±5%)
+- [x] **Execution Failure Cooldown** (Blokir koin selama 15 menit jika gagal eksekusi API untuk cegah loop)
+- [x] **Capital Shield** (Persentase-Loss Exit backup fallback dengan lantai dasar SL 1.0%)
+- [x] **The 40% Block Rule** (Hard Blocker Trailing Stop: Trailing tidak akan aktif sebelum profit mencapai 40% dari batas Cut Loss)
+- [x] **ATR-Based Dynamic SL/TP** (1.5x ATR SL, 2.5x ATR TP dengan slippage buffer 0.01% dan Moon Bag)
+- [x] **Volume Profile Area Gate** (Mean Reversion masuk hanya di/di bawah VAL untuk LONG atau di/di atas VAH untuk SHORT)
+- [x] **Order Flow Absorption Guard** (Anti-fakeout dan pendorong keyakinan entri berdasarkan penyerapan institusional)
+- [x] **Volume Gate & Momentum Guard** (Filter volume < $100k, block melawan trend ekstrem ±20%)
 - [x] **Execution Price Retry** (3x attempt fetch actual fill history price)
 - [x] **holdSide/marginUsed Mapping** (field posisi dari Bitget V2 dipetakan akurat)
 - [x] **Duplicate Position Block** (cegah double exposure pada koin yang sama)
-- [x] **Dynamic Liquidation Threshold** (SCALPING 15%, INTRADAY/SWING 30%)
+- [x] **Dynamic Liquidation Threshold** (Mencegah SL melewatai harga Margin Call)
 - [x] **GEMMA_FLIP_BLOCKED** (hard constraint: blokir AI flip arah saat regime TRENDING)
 - [x] **Adaptive Kalman Filter** (volatility-adjusted measureNoise dengan local std dev)
 - [x] **WLS Price Velocity** (Weighted Least Squares dengan exponential decay weights)
@@ -908,12 +935,7 @@ npm run dev
 - [x] Comprehensive Type Safety (Zod + TypeScript)
 - [x] **Enhanced Market Data** (high_24h, low_24h untuk analisis range)
 - [x] **Clean Error Logging** (axios error message only, bukan full object)
-- [x] **Hurst-Adaptive Strategy Selection** (SCALPING H>=0.50, INTRADAY H>=0.60 — inclusive)
-- [x] **VWAP Value/Premium Area Detection** (daily reset 00:00 UTC)
-- [x] **Trade Lifecycle Tracking** (auto-detect closed positions via Bitget fill history → record exit_price, realized_pnl, result, fees)
-- [x] **Single Pair Mode** (`TRADING_MODE_PAIR=SINGLE` + `FOCUS_PAIR` untuk fokus satu koin)
-- [x] **RWA Blacklist** (otomatis filter saham/komoditas dari scan menggunakan `getExchangeInfo().isRwa`)
-- [x] **Pair Performance Analytics** (aggregatePairPerformance: win rate, avg PnL, PnL ratio, composite score per pair)
+- [x] **Hurst-Adaptive Strategy Selection** (SCALPING H>=0.55, INTRADAY H>=0.60, SWING H>=0.65 — inclusive)
 
 ### 🔜 Rencana Pengembangan
 - [ ] **Volatility Spike Detector** — Filter event-driven moves (change24h > 10% + volume spike > 3x average) menggunakan data MarketData yang sudah ada. Mencegah entry saat pump/dump ekstrem yang tidak diprediksi oleh Trio.
