@@ -260,35 +260,47 @@ async function runHybridTradingLoop(mode: SessionMode) {
                 // EXIT LOGIC: No Fixed TP - Let Profits Run!
                 // ═══════════════════════════════════════════════════════
                 
-                // 1. TIME EXIT (Hard Limit)
+                // 1. TIME EXIT (Hard Limit with R:R Guard)
+                // Do not force-close if profit is too small — let the exchange Stop Loss handle it.
+                // Grace period: extend up to 1.5x maxHold if profit is not yet substantial.
                 if (openTimeMinutes > maxHoldMinutes) {
-                  logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4) }, `[TIME EXIT] ${pos.symbol} ${holdSideDisplay} force closed after ${openTimeMinutes.toFixed(0)}min (Hard Limit) | PnL: $${pnl.toFixed(4)}`);
-                  peakPnlMap.delete(pos.symbol);
-                  if (tradeEntry?._id) await tradeRepository.update(tradeEntry._id.toString(), { exit_reason: TradeExitReason.TIME_LIMIT });
-                  await bitgetClient.closePosition(pos.symbol, (pos.holdSide === 'long' || pos.holdSide === 'short') ? pos.holdSide : 'net', Math.abs(parseFloat(pos.size)).toString());
-                  continue;
+                  const minTimeLimitProfit = maxLossDollarLimit * 0.3; // Minimal 30% of max loss
+                  const graceLimit = maxHoldMinutes * 1.5; // Grace period: 50% extra time
+                  
+                  if (pnl >= minTimeLimitProfit || openTimeMinutes > graceLimit || pnl < 0) {
+                    // Close if: (a) profit is acceptable, (b) grace period expired, (c) position is in loss (let SL/cut handle)
+                    logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4), minProfit: minTimeLimitProfit.toFixed(4) }, `[TIME EXIT] ${pos.symbol} ${holdSideDisplay} force closed after ${openTimeMinutes.toFixed(0)}min (Hard Limit) | PnL: $${pnl.toFixed(4)}`);
+                    peakPnlMap.delete(pos.symbol);
+                    if (tradeEntry?._id) await tradeRepository.update(tradeEntry._id.toString(), { exit_reason: TradeExitReason.TIME_LIMIT });
+                    await bitgetClient.closePosition(pos.symbol, (pos.holdSide === 'long' || pos.holdSide === 'short') ? pos.holdSide : 'net', Math.abs(parseFloat(pos.size)).toString());
+                    continue;
+                  } else {
+                    // Profit is too small — enter grace period, let profit develop
+                    logger.debug({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4), minProfit: minTimeLimitProfit.toFixed(4), graceLimit: graceLimit.toFixed(0) },
+                      `[TIME GRACE] ${pos.symbol} profit too small ($${pnl.toFixed(4)} < $${minTimeLimitProfit.toFixed(4)}). Extending hold until ${graceLimit.toFixed(0)}min.`);
+                  }
                 }
                 
                 // 2. DYNAMIC TRAILING STOP (LET PROFITS RUN - FIX RISK:REWARD)
-                // Syarat: Jangan aktifkan sabuk pengaman (trailing) jika profit belum menyentuh minimal 40% dari batas kerugian (Max Loss).
-                // Ini memaksa bot untuk menahan pergerakan kecil (noise) dan menolak profit recehan (misal $0.02) demi target yang lebih sepadan.
-                const breakEvenTarget = maxLossDollarLimit * 0.4;
+                // Condition: Do not activate trailing stop if profit has not reached at least 60% of Max Loss.
+                // This forces the bot to withstand minor noise and reject small profits for a better R:R ratio.
+                const breakEvenTarget = maxLossDollarLimit * 0.6;
 
                 if (pnl > 0 && highestPnl >= breakEvenTarget) {
-                  let trailingPct = 0.25; // Default: Kunci profit jika turun 25% dari puncak
+                  let trailingPct = 0.35; // Default: Lock profit if it drops 35% from peak (looser)
                   
                   if (highestPnl >= targetProfitDollarLimit * 2) {
-                    trailingPct = 0.45; // Moon bag run: Longgarkan hingga 45% agar profit maksimal
+                    trailingPct = 0.45; // Moon bag run: Loosen to 45% for maximum run
                   } else if (highestPnl >= targetProfitDollarLimit) {
-                    trailingPct = 0.35; // Target tercapai: Longgarkan 35%
+                    trailingPct = 0.35; // Target reached: Loosen to 35%
                   }
 
                   const allowedDrop = highestPnl * trailingPct;
-                  // Drop absolut minimal 20% dari Max Loss agar tidak tersentuh noise spread
+                  // Absolute minimum drop of 20% of Max Loss to avoid spread/noise trigger
                   const minAbsoluteDrop = Math.max(allowedDrop, maxLossDollarLimit * 0.2);
                   const currentDrop = highestPnl - pnl;
 
-                  // Wajib drop persentase tercapai DAN drop absolut melebihi ambang batas
+                  // Percentage drop must be met AND absolute drop must exceed threshold
                   if (currentDrop >= minAbsoluteDrop && currentDrop > minFeeBuffer) {
                     logger.warn({ symbol: pos.symbol, pnl: pnl.toFixed(4), peak: highestPnl.toFixed(4), drop: currentDrop.toFixed(4) },
                       `[TRAILING STOP] ${pos.symbol} ${holdSideDisplay} profit secured after ${openTimeMinutes.toFixed(0)}min (Dropped ${(trailingPct*100).toFixed(0)}% from peak)`);
@@ -302,8 +314,9 @@ async function runHybridTradingLoop(mode: SessionMode) {
                   }
                 }
                 
-                // 3. PROFIT TIME EXIT: After 1 hour, if profit > fee buffer, secure it
-                if (openTimeMinutes > timeProfitExitMinutes && pnl > minFeeBuffer * 1.5) {
+                // 3. PROFIT TIME EXIT: After 1 hour, if profit >= 50% of max loss, secure it (R:R Guard)
+                const minProfitExitThreshold = Math.max(maxLossDollarLimit * 0.5, minFeeBuffer * 1.5); // Minimum 50% of max loss
+                if (openTimeMinutes > timeProfitExitMinutes && pnl > minProfitExitThreshold) {
                   logger.warn({ symbol: pos.symbol, minutes: openTimeMinutes.toFixed(1), pnl: pnl.toFixed(4) }, `[PROFIT EXIT] ${pos.symbol} ${holdSideDisplay} secured profit after ${openTimeMinutes.toFixed(0)}min | PnL: +$${pnl.toFixed(4)}`);
                   peakPnlMap.delete(pos.symbol);
                   if (tradeEntry?._id) await tradeRepository.update(tradeEntry._id.toString(), { exit_reason: TradeExitReason.PROFIT_EXIT });

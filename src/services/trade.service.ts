@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js';
 import { sessionService } from './session.service.js';
 import { TradeResult, TradeAction, TradeExitReason } from '../types/enum.types.js';
 import { symbolCooldown } from '../core/risk/symbol-cooldown.js';
+import { hypothesisTester } from '../utils/hypothesis-tester.js';
 
 export class TradeService {
   async handleTradeDecision(decision: AIDecision, pair: string) {
@@ -241,6 +242,10 @@ export class TradeService {
           }
         }
       }
+      
+      // Auto-trigger hypothesis test on multiples of 30 trades
+      await hypothesisTester.run(true);
+
     } catch (error: any) {
       logger.error({ error: error.message }, 'Failed to sync trade results');
     }

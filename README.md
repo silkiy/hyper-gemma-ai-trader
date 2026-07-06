@@ -949,6 +949,38 @@ npm run dev
 
 ---
 
+## 📊 Protokol Evaluasi & Uji Statistik (Hypothesis Testing)
+
+Sistem ini dievaluasi secara matematis menggunakan uji statistik formal berdasarkan *Central Limit Theorem*. Pengujian wajib dilakukan setelah bot mengumpulkan minimal **30 sampel transaksi (Large Samples, $n \ge 30$)** agar kurva Z/T relevan.
+
+### Perintah Uji Manual:
+```bash
+npm run stats
+```
+
+### Sistem Pemicu Otomatis (Auto-Trigger):
+Bot akan secara otomatis mengevaluasi hasil trade di database dan mencetak laporan pengujian statistik langsung ke konsol log setiap kali trade baru mencapai **kelipatan 30** (30, 60, 90, dst) untuk melacak edge sistem tanpa intervensi manual.
+
+### Parameter Uji Standar:
+1. **Uji Proporsi (Win Rate Test):** 
+   - $H_0$: $p = 0.55$ (Sistem hanya break-even dengan win rate 55%)
+   - $H_1$: $p > 0.55$ (Sistem memiliki edge statistik nyata)
+   - *One Sample Proportion Test (Right-Tailed)* dengan $\alpha = 0.05$.
+2. **Uji Rata-Rata Profit (Expectancy Test):** 
+   - $H_0$: $\mu = 0$ (Rata-rata profitabilitas per trade nol)
+   - $H_1$: $\mu > 0$ (Sistem terbukti profitabel)
+   - *One Sample Mean Test (Right-Tailed)*.
+3. **Uji A/B Algoritma (Version Testing):** 
+   - $H_0$: $\mu_1 - \mu_2 = 0$ (Update baru tidak memberikan PnL lebih baik)
+   - $H_1$: $\mu_1 - \mu_2 > 0$ (Update terbukti memberikan performa superior)
+   - *Two Sample Mean Test* untuk membandingkan Versi A (Sistem Lama) vs Versi B (Sistem Baru).
+
+### 🚫 Pantangan Keras (Hard Blockers):
+- **Sampel Kecil ($n < 30$):** Dilarang keras mengambil kesimpulan prematur (menganggap bot gagal/sukses) berdasarkan ukuran sampel kecil.
+- **Intervensi Manual:** Dilarang keras menutup trade secara manual (*Close Manual*) sebelum menyentuh TP/SL otomatis. Intervensi manusia merusak data uji statistik dan membongkar sistem Trailing Stop.
+
+---
+
 ## 📄 Lisensi
 
 MIT License © 2026 Silki
